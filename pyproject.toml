@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a2a-compliance"
+version = "0.1.0"
+description = "A2A (agent-to-agent) compliance-control protocol — Phase 1: bare control channel + role authority. Works with zero loomground and zero RVND."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "LicenseRef-PLACEHOLDER" }
+authors = [{ name = "Felix Krone (flxk1)" }]
+keywords = ["a2a", "compliance", "fleet", "orchestration", "multi-agent", "values-alignment", "human-in-the-loop"]
+
+# jsonschema and PyYAML are ordinary universal dependencies (NOT loomground/RVND).
+# Both imports are guarded so the load-bearing control path degrades gracefully
+# if either is absent (SPEC invariant 1/2 concern only loomground_* / rvnd.*).
+dependencies = [
+    "jsonschema>=4",
+    "PyYAML>=6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+]
+
+[tool.setuptools]
+packages = ["a2a_compliance", "interfaces"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

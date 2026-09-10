@@ -64,22 +64,86 @@ it does not crash.
   intent) emit A2A directives the maker honours. The desk is the human injection
   point.
 
-## Status
+## Status — Phase 1 is runnable
 
-**SPEC only.** This repo stages a design, not a build. See [`SPEC.md`](SPEC.md)
-for the message contract, the value-plane consumption seam (with the honest
-REAL-CONSUME vs STUB read per plane), the maker participant contract, the
-authority model, the plane manifest, phasing, and honest gaps.
+**Phase 1 (bare A2A + role authority) is built and tested; Phases 2–3 are still
+design.** The `a2a_compliance` package implements the bare control channel end to
+end — with **zero loomground and zero RVND**. See [`SPEC.md`](SPEC.md) for the
+full design (all three modes, the value-plane seam with its honest
+REAL-CONSUME/STUB read, the RVND adapter, phasing, and open gaps).
+
+What Phase 1 gives you (SPEC §12.1):
+
+1. **The A2A control-message contract** — envelope + all eight verbs, validated
+   against `schema/a2a-control-message.schema.json`. `grounding` and
+   `enforcement` are always `null`; a receiver treats `null` as a valid state,
+   never a failure, and ignores unknown fields (`a2a_compliance.envelope`,
+   `a2a_compliance.schema`).
+2. **Role-based authority** from the ctrl team-charter roster — a compliance role
+   (`policy-compliance`/`grounding`/`verify`) may steer a maker it oversees; an
+   out-of-role sender is denied; `halt` is authorized-but-reserved
+   (`a2a_compliance.authority`).
+3. **The governance-block reader** — reads a maker's declared
+   `skill-governance-block` and bounds steering: steer within `actions[]`, route
+   `reserved[]` to the human, never direct into `prohibited[]` (an undeclared
+   kind is refused as outside the boundary). Consumes the block; does not
+   redefine it (`a2a_compliance.governance_block`).
+4. **The maker-side cooperative-poll shim** — a maker polls a session-keyed
+   file-backed inbox at its checkpoints and honours pending directives
+   (`a2a_compliance.inbox`, `a2a_compliance.participant`), driven by the
+   compliance send side (`a2a_compliance.channel`).
+
+### Cooperative-poll mechanism — and its honest limit
+
+The maker-side participant is the load-bearing piece (SPEC §9/§11). Delivery is
+**cooperative**: a directive is delivered only when the maker reaches
+`ControlParticipant.checkpoint()`, and a `halt` is a **cooperative stop at the
+next checkpoint — NOT a forced kill**. The maker's own loop must consult
+`should_continue()` / `is_held()` and yield. A maker that never checkpoints
+cannot be steered by this shim. A forced/instant stop is a harness- or
+RVND-level capability the bare protocol does not promise; the shim is written so
+it can bind to a real harness send/stop primitive later without changing
+callers.
+
+### Quickstart
+
+```bash
+pip install -e ".[dev]"
+pytest -q          # 30 tests: bare-mode flow, authority, governance bound, null-plane semantics
+```
+
+```python
+from a2a_compliance import ComplianceAgent, ControlParticipant, FileInbox, GovernanceBlock, Roster
+
+inbox = FileInbox("/tmp/a2a")
+block = GovernanceBlock.from_manifest("skills/compliance-fleet/SKILL.md")
+comp  = ComplianceAgent("comp-1", "policy-compliance", inbox, Roster(), {"maker-1": block})
+maker = ControlParticipant("maker-1", inbox, compliance_actor="comp-1",
+                           state_provider=lambda inc: {"trajectory": []})
+
+comp.issue_directive("maker-1", "keep edits in module X", "constrain", target_kind="query_state")
+maker.checkpoint()   # maker polls, honours the directive, acks back
+```
 
 ## Layout
 
 ```
 a2a-compliance/
 ├── .claude-plugin/plugin.json          # ctrl-plane plugin ("skills": "./skills/")
-├── skills/compliance-fleet/SKILL.md    # skeletal skill manifest + governance: block
-├── schema/a2a-control-message.schema.json   # the A2A envelope (interface-only)
-├── interfaces/a2a_control.py           # message contract + maker participant (interface-only)
-├── interfaces/compliance_fleet.py      # value-plane consumption seam (interface-only)
+├── skills/compliance-fleet/SKILL.md    # skill manifest + governance: block
+├── schema/a2a-control-message.schema.json   # the A2A envelope (validated in Phase 1)
+├── interfaces/a2a_control.py           # message contract + participant SEAM (Protocols)
+├── interfaces/compliance_fleet.py      # value-plane consumption seam (Phase 2, still interface-only)
+├── a2a_compliance/                     # Phase-1 working package
+│   ├── envelope.py                     #   message construction + wire serialization
+│   ├── schema.py                       #   jsonschema validation (guarded)
+│   ├── authority.py                    #   role-based authority (team-charter roster)
+│   ├── governance_block.py             #   the governance-block reader
+│   ├── inbox.py                        #   file-backed cooperative-poll inbox
+│   ├── participant.py                  #   maker-side control-participant shim
+│   └── channel.py                      #   compliance-agent send side
+├── tests/                              # 30 tests; bare-mode end-to-end
+├── pyproject.toml                      # package + [dev] test extra
 ├── SPEC.md                             # the design
 ├── README.md
 ├── REUSE.toml, LICENSES/               # licensing placeholders
