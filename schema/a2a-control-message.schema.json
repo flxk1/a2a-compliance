@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/a2a-compliance/schema/a2a-control-message.schema.json",
+  "title": "A2A compliance control message",
+  "description": "Interface-only (SPEC stage). The envelope for one agent-to-agent control message between a compliance agent and a maker. grounding is null in bare mode, populated when a loomground value plane is present; enforcement is null unless RVND is present. A receiver MUST ignore unknown fields and MUST NOT treat a null grounding/enforcement as failure. See SPEC.md §3.",
+  "type": "object",
+  "required": ["protocol", "id", "ts", "from", "to", "verb", "body", "authority"],
+  "additionalProperties": true,
+  "properties": {
+    "protocol": { "const": "a2a-compliance/0.1" },
+    "id": { "type": "string", "description": "message uuid" },
+    "correlates": { "type": ["string", "null"], "description": "id of the message this replies to / continues" },
+    "ts": { "type": "string", "format": "date-time" },
+    "from": { "$ref": "#/$defs/party" },
+    "to": { "$ref": "#/$defs/party" },
+    "verb": {
+      "enum": [
+        "query-state", "issue-directive", "hold", "resume", "halt",
+        "report-state", "ack", "escalate"
+      ]
+    },
+    "body": { "type": "object", "description": "verb-specific; see #/$defs/bodies" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "grounding": {
+      "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/grounding" } ],
+      "description": "null in bare mode; the grounded steer criterion when a loomground value plane is present"
+    },
+    "enforcement": {
+      "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/enforcement" } ],
+      "description": "null unless RVND is present"
+    }
+  },
+  "$defs": {
+    "party": {
+      "type": "object",
+      "required": ["actor", "role"],
+      "properties": {
+        "actor": { "type": "string" },
+        "role": {
+          "type": "string",
+          "description": "a ctrl team-charter role (e.g. policy-compliance, grounding, verify) or 'maker'"
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "required": ["basis"],
+      "description": "who authorizes this message. basis 'role' is the hard footing; RVND (if present) sharpens it via the enforcement block.",
+      "properties": {
+        "basis": { "enum": ["role"] },
+        "role": { "type": "string" },
+        "oversees": { "type": "string" },
+        "reserved": { "type": "boolean", "description": "true = surfaced to the human before dispatch (e.g. halt)" }
+      }
+    },
+    "grounding": {
+      "type": "object",
+      "description": "the value criterion drawn from a loomground plane. Per-dimension: a dimension whose plane is absent is simply omitted (advisory fallback), never fabricated.",
+      "properties": {
+        "verdict": { "enum": ["SATISFIED", "NOT_SATISFIED", "OPEN"], "description": "solver Verdict; NOT_SATISFIED => steer/hold, OPEN => escalate" },
+        "planes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["plane", "verdict"],
+            "properties": {
+              "plane": { "enum": ["deontic", "norm", "mandate", "escalation", "proxy", "falsifiability"] },
+              "verdict": { "enum": ["SATISFIED", "NOT_SATISFIED", "OPEN"] },
+              "detail": { "type": "object", "description": "plane-specific evidence (e.g. deontic O/P/F + bearer/action, mandate divergence kinds, escalation binding factors)" }
+            }
+          }
+        },
+        "criterion_ref": { "type": "string", "description": "handle into the value graph (norm/obligation version)" }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "required": ["engine", "verdict"],
+      "properties": {
+        "engine": { "const": "rvnd" },
+        "verdict": { "enum": ["permit", "hold", "deny"] },
+        "gate_verdict": { "enum": ["GO", "CONDITIONAL", "NO-GO"] },
+        "audit_id": { "type": ["string", "null"] },
+        "advisory": { "type": "boolean", "description": "true = preview only, chain NOT written; false = enforced, chain written" }
+      }
+    },
+    "bodies": {
+      "description": "Non-normative catalogue of verb bodies (see SPEC.md §3.2/§3.3). Not enforced by this schema's body:object; here for reference.",
+      "query-state": {
+        "type": "object",
+        "properties": { "include": { "type": "array", "items": { "enum": ["mandate", "trajectory", "tools", "claims"] } } }
+      },
+      "issue-directive": {
+        "type": "object",
+        "required": ["instruction", "kind"],
+        "properties": {
+          "instruction": { "type": "string" },
+          "kind": { "enum": ["correct", "constrain", "redirect"] },
+          "reason_ref": { "type": "string" }
+        }
+      },
+      "hold": {
+        "type": "object",
+        "properties": {
+          "scope": { "enum": ["next-action", "session"] },
+          "reason_ref": { "type": "string" },
+          "conditions": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "resume": { "type": "object", "properties": { "hold_ref": { "type": "string" }, "note": { "type": "string" } } },
+      "halt": {
+        "type": "object",
+        "required": ["scope", "irreversible"],
+        "properties": {
+          "reason_ref": { "type": "string" },
+          "scope": { "const": "session" },
+          "irreversible": { "const": true }
+        }
+      },
+      "report-state": {
+        "type": "object",
+        "required": ["provenance"],
+        "properties": {
+          "mandate": { "type": "object" },
+          "trajectory": { "type": "array", "items": { "type": "object" } },
+          "tools": { "type": "object" },
+          "claims": { "type": "array", "items": { "type": "object" } },
+          "provenance": { "const": "self-report", "description": "a maker's own account; NEVER promoted to witnessed/observed" }
+        }
+      },
+      "ack": {
+        "type": "object",
+        "required": ["directive_ref", "accepted"],
+        "properties": {
+          "directive_ref": { "type": "string" },
+          "accepted": { "type": "boolean", "description": "false + note = principled refusal (routes to escalate)" },
+          "note": { "type": "string" }
+        }
+      },
+      "escalate": {
+        "type": "object",
+        "required": ["trigger", "requested"],
+        "properties": {
+          "trigger": { "type": "string" },
+          "detail": { "type": "string" },
+          "requested": { "enum": ["guidance", "authority", "human"] }
+        }
+      }
+    }
+  }
+}

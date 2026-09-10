@@ -1,0 +1,12 @@
+# REUSE 3.x — licensing placeholder for a2a-compliance (SPEC stage).
+# Finalise SPDX identifiers before any publication (a reserved act).
+version = 1
+SPDX-PackageName = "a2a-compliance"
+SPDX-PackageSupplier = "Felix Krone (flxk1)"
+SPDX-PackageDownloadLocation = "LOCAL — no remote (publication reserved)"
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Felix Krone (flxk1)"
+SPDX-License-Identifier = "LicenseRef-PLACEHOLDER"
