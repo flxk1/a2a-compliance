@@ -39,6 +39,19 @@ from .governance_block import GovernanceBlock, SteerDecision, SteerRuling
 from .inbox import FileInbox
 from .participant import ControlParticipant, DirectiveRecord
 from .channel import ComplianceAgent, DispatchResult
+from . import planes
+from .planes import ALL_PLANES, DimensionFinding, available, availability
+from . import grounding
+from .grounding import (
+    GroundingContext,
+    GroundingResult,
+    accept_compiled_policy,
+    ground,
+    ACTION_NO_STEER,
+    ACTION_STEER,
+    ACTION_HOLD,
+    ACTION_ROUTE_HUMAN,
+)
 
 __all__ = [
     "Verb",
@@ -64,4 +77,18 @@ __all__ = [
     "DirectiveRecord",
     "ComplianceAgent",
     "DispatchResult",
+    "planes",
+    "ALL_PLANES",
+    "DimensionFinding",
+    "available",
+    "availability",
+    "grounding",
+    "GroundingContext",
+    "GroundingResult",
+    "accept_compiled_policy",
+    "ground",
+    "ACTION_NO_STEER",
+    "ACTION_STEER",
+    "ACTION_HOLD",
+    "ACTION_ROUTE_HUMAN",
 ]

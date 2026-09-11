@@ -27,7 +27,10 @@ from .governance_block import GovernanceBlock, SteerRuling, SteerDecision
 class DispatchResult:
     """Outcome of a compliance -> maker send. `dispatched` is False when the act
     was denied by authority, refused by the governance boundary, or surfaced to
-    the human as a reserved act (in which case `surfaced_to_human` is True)."""
+    the human as a reserved act (in which case `surfaced_to_human` is True).
+
+    `grounding_result` (Phase 2) carries the value-graph derivation when the send
+    came from `ground_and_steer`; None otherwise (a bare Phase-1 send)."""
 
     dispatched: bool
     authorization: Authorization
@@ -35,6 +38,7 @@ class DispatchResult:
     ruling: Optional[SteerRuling] = None
     surfaced_to_human: bool = False
     denied_reason: Optional[str] = None
+    grounding_result: Optional[object] = None
 
 
 @dataclass
@@ -194,3 +198,59 @@ class ComplianceAgent:
         """Drain this compliance agent's own mailbox (acks / report-state /
         escalate posted back by makers)."""
         return [env.from_wire(w) for w in self.inbox.poll(self.session_id)]
+
+    # --- Phase 2: value-grounded steer (SPEC §4) -----------------------------
+
+    def ground_and_steer(
+        self,
+        maker: str,
+        context,
+        *,
+        target_kind: Optional[str] = None,
+        planes: Optional[tuple[str, ...]] = None,
+    ) -> DispatchResult:
+        """Derive a steer/hold/escalate from the loomground value graph and dispatch
+        the mapped verb, attaching the grounded `Grounding` block to the message.
+
+        Bare mode (no plane present, or all disabled): `ground()` returns
+        `grounding=None` and a role-advisory recommendation — identical to a Phase-1
+        send. A plane present sharpens the criterion; each dimension degrades
+        independently. Mapping: prohibition/gamed -> hold; escalation ceiling ->
+        route-human (reserved, not dispatched); mandate/norm -> steer; OPEN -> route
+        to human. The grounding module is imported lazily so the bare import path
+        stays loomground-free."""
+        from . import grounding as G
+
+        result = G.ground(context, planes=planes if planes is not None else G.ALL_PLANES)
+        block = result.grounding  # envelope grounding block (None in bare mode)
+
+        if result.recommended_action == G.ACTION_HOLD:
+            disp = self.hold(
+                maker, "next-action", reason_ref="grounded", grounding=block
+            )
+            disp.grounding_result = result
+            return disp
+
+        if result.recommended_action == G.ACTION_STEER:
+            disp = self.issue_directive(
+                maker, result.reason, "constrain",
+                target_kind=target_kind, reason_ref="grounded", grounding=block,
+            )
+            disp.grounding_result = result
+            return disp
+
+        if result.recommended_action == G.ACTION_ROUTE_HUMAN:
+            # Reserved: an over-ceiling / unassessed finding surfaces to the human and
+            # is NOT auto-dispatched (SPEC §4.1, §5.1 reserved-act posture).
+            auth = self._authorize(Verb.ISSUE_DIRECTIVE, maker)
+            return DispatchResult(
+                False, auth, surfaced_to_human=True,
+                denied_reason=f"grounded finding routes to the human: {result.reason}",
+                grounding_result=result,
+            )
+
+        # no-steer: the maker is within values; nothing is dispatched.
+        auth = self._authorize(Verb.QUERY_STATE, maker)
+        return DispatchResult(
+            False, auth, denied_reason=None, grounding_result=result,
+        )

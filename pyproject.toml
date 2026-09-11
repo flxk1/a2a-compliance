@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "a2a-compliance"
 version = "0.1.0"
-description = "A2A (agent-to-agent) compliance-control protocol — Phase 1: bare control channel + role authority. Works with zero loomground and zero RVND."
+description = "A2A (agent-to-agent) compliance-control protocol — bare control channel + role authority, with optional loomground value grounding. Works with zero loomground and zero RVND."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "LicenseRef-PLACEHOLDER" }
