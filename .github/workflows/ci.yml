@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 flxk1
+name: ci
+on:
+  push:
+    branches-ignore:
+      - 'release-please--**'
+  pull_request:
+
+jobs:
+  reuse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - name: REUSE / SPDX licensing compliance
+        uses: fsfe/reuse-action@ef1dfe28dda4d13f5d580f0444eb27dda9746e9b  # v5
+
+  tests:
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout a2a-compliance
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          path: a2a-compliance
+      # tests/test_grounding_grounded.py real-consumes all six value planes; three of
+      # them (mandate, escalation, falsifiability) are consumed straight off an on-disk
+      # sibling checkout, exactly as tests/_ground_probe.py and the README document —
+      # this is not packaged/pip-installed, by the plane's own on-disk-src contract.
+      - name: checkout loomground-mandate (on-disk plane src)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          repository: flxk1/loomground-mandate
+          ref: bf147383509813e3bfd7bc4a2770a42a6072aa4d
+          path: loomground-repos/loomground-mandate
+      - name: checkout loomground-escalation (on-disk plane src)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          repository: flxk1/loomground-escalation
+          ref: 82c3e05f2241383e210e5621591c9072b894232f
+          path: loomground-repos/loomground-escalation
+      - name: checkout loomground-falsifiability (on-disk plane src)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          repository: flxk1/loomground-falsifiability
+          ref: 2e000ca163a92b9b897e83b3030291468daaea30
+          path: loomground-repos/loomground-falsifiability
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # The remaining planes (deontic, norm, proxy, governance, solver) are
+      # pip-installed, not on PyPI, --no-deps because their own declared
+      # version ranges are not resolvable from a bare install.
+      - name: install a2a-compliance + the remaining value planes
+        run: |
+          python3 -m pip install "./a2a-compliance[dev]"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-deontic.git@35f8eabdc533b275a086b20c8d7a161f4acc46a8"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-norm.git@104a3ca2272e34898b23fa43ba164e968d8f1001"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-proxy.git@c3936382b494bf1942943294ec537418354d4178"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-governance.git@270e11d0bbded46c810b2fe56559323d6dcd969a"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-solver.git@5f674da3dab5a0763d4cb61bae576797ebd5f788"
+      # policy-compiler sibling intentionally absent — the two compile-to-ground
+      # tests self-skip per their own skipif, honestly.
+      - name: test
+        working-directory: a2a-compliance
+        run: python3 -m pytest -q
+
+  commit-discipline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+      - name: commit discipline (new commits only)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch -q origin ${{ github.base_ref }}
+            range="origin/${{ github.base_ref }}..HEAD"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "${{ github.event.before }}" 2>/dev/null; then
+            range="${{ github.event.before }}..${{ github.sha }}"
+          else
+            range="${{ github.sha }} -1"
+          fi
+          bad=0
+          git log --no-merges --format='%s' $range | awk 'length($0)>72 {print "subject >72 chars: " $0; bad=1} END {exit bad}' || bad=1
+          if git log --no-merges --format='%(trailers)' $range | grep -iE '^Co-Authored-By:.*(claude|codex|openai|anthropic|copilot|gemini)'; then
+            echo "AI co-author trailer found — use the assisted line instead"; bad=1
+          fi
+          exit $bad
