@@ -1,0 +1,57 @@
+# a2a-compliance
+
+> An A2A (agent-to-agent) compliance-control protocol and compliance-fleet contract: compliance agents steer maker agents over a query-state / issue-directive / hold / resume / halt channel, drawing their steering criteria from the loomground value-plane grammar (O/P/F deontic norms and five other planes) when it is present.
+
+## Problem
+A compliance agent watching another agent has no standard channel to query its state, hold it, or direct it, and no standard place for the steering criteria to come from. a2a-compliance defines that channel — the A2A control-message envelope, both directions — and, when loomground is installed, grounds the hold/steer/escalate decision in the value graph instead of ad hoc judgement. It runs with zero loomground and zero RVND; both are optional enrichment behind availability checks, never a hard dependency.
+
+## Install
+```
+pip install "a2a-compliance @ git+https://github.com/flxk1/a2a-compliance@v0.1.0"
+```
+Import name `a2a_compliance`. Base install has zero hard dependencies; `jsonschema` (envelope validation) and `PyYAML` (governance-block manifests) are optional extras: `.[schema]`, `.[manifest]`, or `.[dev]` for both plus `pytest`.
+
+## Usage
+```python
+from a2a_compliance import ComplianceAgent, FileInbox, Roster, GroundingContext, accept_compiled_policy
+
+comp = ComplianceAgent("comp-1", "policy-compliance", FileInbox("/tmp/a2a"), Roster())
+policy = accept_compiled_policy(compiled_policy.to_grounding_seam())  # from policy-compiler
+ctx = GroundingContext(
+    maker_id="maker-1",
+    proposed_action={"bearer": "maker", "action": "delete the audit trail"},
+    policy=policy,
+)
+disp = comp.ground_and_steer("maker-1", ctx)   # deontic collision -> a grounded hold
+disp.grounding_result.recommended_action       # "hold"
+```
+
+```python
+from a2a_compliance import ComplianceAgent, ControlParticipant, FileInbox, GovernanceBlock, Roster
+
+inbox = FileInbox("/tmp/a2a")
+block = GovernanceBlock.from_manifest("skills/compliance-fleet/SKILL.md")
+comp  = ComplianceAgent("comp-1", "policy-compliance", inbox, Roster(), {"maker-1": block})
+maker = ControlParticipant("maker-1", inbox, compliance_actor="comp-1",
+                            state_provider=lambda inc: {"trajectory": []})
+
+comp.issue_directive("maker-1", "keep edits in module X", "constrain", target_kind="query_state")
+maker.checkpoint()   # maker polls, honours the directive, acks back
+```
+
+CLI: none. The package is invoked as a library or via the `compliance-fleet` skill.
+
+## Contracts
+| Surface | Definition |
+|---|---|
+| A2A envelope | `schema/a2a-control-message.schema.json`; eight verbs (`query-state`, `issue-directive`, `hold`, `resume`, `halt`, `report-state`, `ack`, `escalate`) |
+| Message + participant seam | `interfaces/a2a_control.py` (Protocols) |
+| Value-plane consumption seam | `interfaces/compliance_fleet.py`, `a2a_compliance/planes.py` — deontic · norm · mandate · escalation · proxy · falsifiability, each behind an availability probe |
+| Grounding + steer mapping | `a2a_compliance/grounding.py`: weakest-link, OPEN-dominant fold to `hold` / `route-human` / `steer` / `no-steer` |
+| Authority | `a2a_compliance/authority.py` — role-based, from the ctrl team-charter roster |
+| Governance-block reader | `a2a_compliance/governance_block.py` — steer bounded to a maker's declared `skill-governance-block` (`actions[]` / `reserved[]` / `prohibited[]`) |
+| Live send/stop transport | `a2a_compliance/harness.py` (opt-in); `Spawner` Protocol, `SubprocessSpawner` default |
+| Policy handoff | `accept_compiled_policy`, consuming `policy-compiler`'s `CompiledPolicy.to_grounding_seam()` output |
+| Skill entry | `skills/compliance-fleet/SKILL.md` |
+
+Design reference: `SPEC.md`.
