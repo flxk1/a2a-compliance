@@ -1,8 +1,0 @@
-LicenseRef-PLACEHOLDER
-
-SPEC-stage placeholder. No license is granted yet. The final SPDX license
-identifier (the recommendation, per SPEC §10, is a permissive OSI license such
-as Apache-2.0, matching the vendor-neutral skill-governance-block sibling) is to
-be chosen by the owner before any publication. Publication is a reserved act.
-
-Owner: Felix Krone (flxk1).
