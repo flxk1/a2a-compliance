@@ -157,6 +157,34 @@ RVND-level capability the bare protocol does not promise; the shim is written so
 it can bind to a real harness send/stop primitive later without changing
 callers.
 
+### Live send/stop transport
+
+`a2a_compliance/harness.py` is the enforceable counterpart to the cooperative
+poll — an **optional, opt-in** transport for makers the fleet **spawns**. It is
+not on the default import path (`import a2a_compliance` pulls in no harness or
+subprocess-spawn driver); callers opt in with `from a2a_compliance import
+harness`. It satisfies the same put/poll transport seam `FileInbox` does, so a
+`ComplianceAgent(inbox=harness_transport)` binds real send/stop **without
+changing callers**, delivering the identical `query-state` / `issue-directive` /
+`hold` / `resume` / `halt` envelopes.
+
+Two honest tiers:
+
+- **Spawn-owned maker** — a maker this transport launched. `deliver()` sends a
+  directive over the file-inbox channel the maker drains at its checkpoints;
+  `stop()` is a **real termination** of the child process. Genuinely enforceable
+  send/stop.
+- **Maker it did NOT spawn** — cooperative fallback: `deliver()` / `stop()`
+  delegate to the plain `FileInbox`, observed at the maker's next checkpoint. The
+  harness does not expose arbitrary live cross-session messaging, so it does not
+  claim a forced kill of a maker it does not own — that stays a cooperative stop.
+
+The `Spawner` Protocol is the driver seam. `SubprocessSpawner` is the real,
+testable default (a maker runs as a child process). `ClaudeHarnessSpawner` is a
+documented injection point for the Claude-Code harness — spawn ~ the Agent tool,
+stop ~ TaskStop — which are host agent-tools, not a Python API, so it is a seam
+the host wires, not a working in-module driver.
+
 ### Quickstart
 
 ```bash
@@ -213,6 +241,7 @@ a2a-compliance/
 │   ├── governance_block.py             #   the governance-block reader
 │   ├── inbox.py                        #   file-backed cooperative-poll inbox
 │   ├── participant.py                  #   maker-side control-participant shim
+│   ├── harness.py                      #   opt-in live send/stop transport (spawn-owned) + Spawner seam
 │   ├── channel.py                      #   compliance-agent send side (+ ground_and_steer)
 │   ├── planes.py                       #   per-plane loomground consumption (availability-guarded)
 │   └── grounding.py                    #   the fleet's derivation + steer/hold/escalate mapping
