@@ -225,7 +225,7 @@ construction").
 ### 4.2 The six value planes — honest read (REAL-CONSUME vs STUB) + fallback
 
 All six were inspected (their real `src/` packages, public symbols, and passing
-suites). **Verdict: all six are REAL-CONSUME today** — each has an installed,
+suites). **Verdict: all six are REAL-CONSUME** — each has an installed,
 importable package with a typed, callable API returning the common solver
 `Verdict`. There is **no stub among the value repos.** (The genuine stubs in this
 system are elsewhere — the maker-side A2A shim and the live-steering channel;
