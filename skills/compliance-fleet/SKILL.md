@@ -1,23 +1,15 @@
 ---
 name: compliance-fleet
 description: >-
-  Control a fleet of maker agents and keep them aligned to the operator's
-  values, over an A2A (agent-to-agent) control channel: query a maker's state,
-  issue a directive, hold, resume, or halt (compliance -> maker); receive
-  report-state, ack, escalate (maker -> compliance). Works fully with ZERO
-  loomground and ZERO RVND: in bare mode the steering criteria are the ctrl
-  compliance ROLE's advisory judgement and authority is role-based from the
-  team-charter roster. loomground is an OPTIONAL, UNIVERSAL enrichment: when a
-  value plane is present the steer criteria are DRAWN FROM the grounded value
-  graph (O/P/F deontic norms, mandate, escalation, proxy, falsifiability) behind
-  per-plane flags, degrading to advisory per dimension when absent. RVND is an
-  OPTIONAL enforcement skin behind an adapter that no-ops when absent — it adds
-  a permit/hold/deny verdict + signed chain to a directive; its absence never
-  blocks an op. The A2A directive is the live steer primitive the ctrl-desk
-  steer/hold op needs, and it steers a maker WITHIN the boundary the maker
-  declares in its skill-governance block. Triggers on "control my agents",
-  "keep the makers aligned", "steer/hold/halt this maker", "watch the fleet for
-  value drift", "issue a compliance directive". Implemented in the a2a_compliance package (bare control + value grounding); SPEC.md is the design reference.
+  Control a fleet of maker agents and keep them aligned to the operator's values, over an A2A (agent-to-agent)
+  control channel: query a maker's state, issue a directive, hold, resume or halt; receive report-state, ack
+  and escalate back. Works with no loomground and no RVND: in bare mode the steering criteria are the
+  compliance role's advisory judgement and authority is role-based. loomground is optional enrichment — where
+  a value plane is present the criteria are drawn from the grounded value graph, degrading to advisory per
+  dimension when it is absent. RVND is an optional enforcement skin that adds a verdict and a signed chain to
+  a directive and no-ops when absent. A directive steers a maker within the boundary that maker declares in
+  its own governance block. Triggers on "control my agents", "keep the makers aligned", "steer/hold/halt this
+  maker", "watch the fleet for value drift", "issue a compliance directive".
 governance:
   grade: L1
   actions:
