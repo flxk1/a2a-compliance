@@ -59,8 +59,8 @@ the control channel and cooperative-poll participant, role-based authority from
 the team-charter roster, the governance-block reader, and the value grounding —
 `planes.py` consumes the six loomground value planes behind per-plane
 availability, and `grounding.py` folds their verdicts into the envelope
-`grounding` block and the steer / hold / escalate decision. The RVND enforcement
-plane is not yet wired.
+`grounding` block and the steer / hold / escalate decision. RVND enforcement
+(Phase 3) is a declared, flag-gated seam.
 
 ## Verbs (see SPEC §3)
 

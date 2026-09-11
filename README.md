@@ -280,6 +280,4 @@ control within it). At publication the recommendation is a neutral `spec/` core 
 a `bindings/` appendix (ctrl = the role-authority binding, loomground = the
 value-criterion binding, RVND = the enforcement binding). See SPEC §10.
 
-Local only. No remote; publication is reserved for the owner.
-
-Owner: Felix Krone (flxk1).
+Owner: flxk1.

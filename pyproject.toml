@@ -9,7 +9,7 @@ description = "A2A (agent-to-agent) compliance-control protocol — bare control
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-authors = [{ name = "Felix Krone (flxk1)" }]
+authors = [{ name = "flxk1" }]
 keywords = ["a2a", "compliance", "fleet", "orchestration", "multi-agent", "values-alignment", "human-in-the-loop"]
 
 # The bare control path (channel, authority, envelope) has zero hard deps.

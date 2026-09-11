@@ -1,19 +1,21 @@
-"""a2a-compliance — Phase 1: bare A2A control channel + role authority.
+"""a2a-compliance — bare A2A control channel, role authority, and loomground value grounding.
 
-Working, tested implementation of the SPEC's Phase-1 scope (SPEC §12.1):
-- the A2A control-message contract (envelope + verbs), `grounding`/`enforcement`
-  null — `envelope`, `schema`;
+Implements the SPEC's Phase 1 and Phase 2 scope (SPEC §12.1-2):
+- the A2A control-message contract (envelope + verbs) — `envelope`, `schema`;
 - role-based authority from the ctrl team-charter roster — `authority`;
 - the governance-block reader (steer within the declared boundary) —
   `governance_block`;
 - the maker-side cooperative-poll control-participant shim — `inbox`,
   `participant`;
-- the compliance-agent send side — `channel`.
+- the compliance-agent send side — `channel`;
+- per-plane loomground value consumption and the grounded steer/hold/escalate
+  decision — `planes`, `grounding`.
 
-Works with ZERO loomground and ZERO RVND. The loomground value-grounding
-(Phase 2) and RVND enforcement (Phase 3) are declared-but-inert optional seams
-(`grounding=None`, `enforcement=None`); no `loomground_*` / `rvnd.*` import is on
-this path.
+Works with ZERO loomground and ZERO RVND: each loomground plane degrades to the
+bare advisory/role reading when absent, and no `loomground_*` import happens
+until a present plane is actually consumed. RVND enforcement (Phase 3) is a
+declared, flag-gated seam (`enforcement=None` until an adapter lands); no
+`rvnd.*` import is on this path.
 """
 
 from interfaces.a2a_control import (

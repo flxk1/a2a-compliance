@@ -6,8 +6,8 @@ compliance agent draws a steer/hold criterion from the loomground value graph
 flag off => advisory fallback for that dimension (SPEC §4.3). Nothing here is a
 hard dependency; nothing here is fleet-specific.
 
-Honest read (SPEC §4.2): all six value planes are REAL-CONSUME today — each has
-an installed, importable package with a typed API returning the common solver
+Honest read (SPEC §4.2): all six value planes are REAL-CONSUME — each has an
+installed, importable package with a typed API returning the common solver
 Verdict. The imports are shown as guarded stubs; the real symbols are named in
 the docstrings so the seam is unambiguous.
 """
@@ -38,7 +38,7 @@ class ValuePlane(Protocol):
 
 
 # --- the six planes: real-consume interfaces (SPEC §4.2) -------------------
-# Each maps a generic call to the real loomground symbol. REAL-CONSUME today.
+# Each maps a generic call to the real loomground symbol. REAL-CONSUME.
 
 class DeonticPlane(Protocol):
     """loomground-deontic (pkg `deontic`). REAL-CONSUME.
