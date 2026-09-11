@@ -1,14 +1,14 @@
 ---
 name: compliance-fleet
 description: >-
-  Control a fleet of maker agents and keep them aligned to the operator's values, over an A2A (agent-to-agent)
-  control channel: query a maker's state, issue a directive, hold, resume or halt; receive report-state, ack
-  and escalate back. Works with no loomground and no RVND: in bare mode the steering criteria are the
-  compliance role's advisory judgement and authority is role-based. loomground is optional enrichment — where
-  a value plane is present the criteria are drawn from the grounded value graph, degrading to advisory per
-  dimension when it is absent. RVND is an optional enforcement skin that adds a verdict and a signed chain to
-  a directive and no-ops when absent. A directive steers a maker within the boundary that maker declares in
-  its own governance block. Triggers on "control my agents", "keep the makers aligned", "steer/hold/halt this
+  Compliance agents steer maker agents over an agent-to-agent control channel, keeping them aligned to the
+  operator's values: query a maker's state, issue a directive, hold, resume or halt; receive report-state,
+  ack and escalate back. Authority is role-based, and a directive stays within the boundary that maker
+  declares in its own governance block. Works in bare mode with zero loomground and zero RVND, where the
+  steering criterion is the compliance role's advisory judgement. loomground is optional enrichment — where
+  a value plane is present the criterion is drawn from the grounded value graph, degrading to advisory per
+  dimension when that plane is absent. RVND is an optional enforcement skin that adds a verdict and a signed
+  chain to a directive. Triggers on "control my agents", "keep the makers aligned", "steer/hold/halt this
   maker", "watch the fleet for value drift", "issue a compliance directive".
 governance:
   grade: L1
