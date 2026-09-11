@@ -8,20 +8,28 @@ version = "0.1.0"
 description = "A2A (agent-to-agent) compliance-control protocol — bare control channel + role authority, with optional loomground value grounding. Works with zero loomground and zero RVND."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "LicenseRef-PLACEHOLDER" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Felix Krone (flxk1)" }]
 keywords = ["a2a", "compliance", "fleet", "orchestration", "multi-agent", "values-alignment", "human-in-the-loop"]
 
-# jsonschema and PyYAML are ordinary universal dependencies (NOT loomground/RVND).
-# Both imports are guarded so the load-bearing control path degrades gracefully
-# if either is absent (SPEC invariant 1/2 concern only loomground_* / rvnd.*).
-dependencies = [
-    "jsonschema>=4",
-    "PyYAML>=6",
-]
+# The bare control path (channel, authority, envelope) has zero hard deps.
+# jsonschema (schema.py) and PyYAML (governance_block.py) are imported lazily,
+# function-local, and guarded: each falls back to a structural/absent-feature
+# path when its package is missing, so the base install stays importable and
+# functional with neither installed (SPEC invariant 1/2 concern only
+# loomground_* / rvnd.*, which this repo never hard-depends on either).
+dependencies = []
 
 [project.optional-dependencies]
+schema = [
+    "jsonschema>=4",
+]
+manifest = [
+    "PyYAML>=6",
+]
 dev = [
+    "jsonschema>=4",
+    "PyYAML>=6",
     "pytest>=7",
 ]
 

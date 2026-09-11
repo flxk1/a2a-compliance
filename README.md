@@ -26,6 +26,25 @@ grounds its criteria it uses loomground and never builds a parallel grounding
 layer; when loomground is absent it degrades to role-based / advisory control —
 it does not crash.
 
+## Install
+
+From the `loomground-plugins` marketplace (publication pending):
+
+```
+/plugin marketplace add flxk1/loomground-plugins
+/plugin install a2a-compliance@loomground
+```
+
+Directly from GitHub, with pip:
+
+```
+pip install "git+https://github.com/flxk1/a2a-compliance.git"
+```
+
+Base install has zero hard dependencies (`jsonschema` and `PyYAML` are optional
+extras — `.[schema]`, `.[manifest]`, or `.[dev]` for both plus `pytest`); see
+[Two overriding invariants](#two-overriding-invariants) above.
+
 ## Two axes, kept separate
 
 ```
