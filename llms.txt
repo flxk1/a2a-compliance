@@ -30,6 +30,7 @@ maker.checkpoint()
 - boundary: `GovernanceBlock.from_manifest(path).rule(kind) → SteerRuling(SteerDecision.STEER | ROUTE_HUMAN | REFUSE)`
 - grounding: `ground(GroundingContext) → GroundingResult` · `ALL_PLANES` · `available(plane)` · `accept_compiled_policy(payload)` ([docs/value-grounding.md](docs/value-grounding.md))
 - team: `ComplianceTeam.plan(ControlRequest) → ControlPlan` · `ComplianceTeam.assess(ControlRequest, GroundingResult) → ControlPlan`. Eight roles assign all 41 public family repositories exactly once and consume their published tools, skills, contracts, or distribution surfaces. `ready` means ready to begin those host-orchestrated hand-offs, never ready to dispatch. ([docs/compliance-team.md](docs/compliance-team.md))
+- role contracts: `role_manifests()` loads eight packaged `a2a_compliance/roles/*.json` manifests; `schema/compliance-role.schema.json` validates identity, inputs, outputs, allowed capabilities, prohibited effects and hand-offs. Every role sets `may_dispatch: false`.
 - wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`; `Verb`, `Message`, `Grounding`, `Enforcement` re-exported from `interfaces.a2a_control`
 
 ## Profiles

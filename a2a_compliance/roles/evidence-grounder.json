@@ -1,0 +1,11 @@
+{
+  "id": "evidence-grounder",
+  "identity": "a2a-compliance/evidence-grounder",
+  "purpose": "Acquire, normalise and span-ground evidence.",
+  "inputs": ["host_acquired_sources"],
+  "outputs": ["dimensioned_subgraph", "span_grounded_claims"],
+  "allowed_capabilities": ["tool:ingest_text", "tool:versum_index", "skill:loomground-ingest", "skill:loomground-kg"],
+  "prohibited_effects": ["host_dispatch", "source_fabrication", "provenance_promotion"],
+  "handoff_to": ["policy-compiler"],
+  "may_dispatch": false
+}

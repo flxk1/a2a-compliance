@@ -55,6 +55,9 @@ out: edit   decision=steer        dispatched=True  verb=issue-directive
   plan assigns all 41 public family repositories to eight roles and names the
   tools, skills, contracts and distributions each role consumes. It performs no
   dispatch or enforcement ([docs/compliance-team.md](docs/compliance-team.md)).
+- roles: eight packaged contracts in `a2a_compliance/roles/*.json`, validated by
+  `schema/compliance-role.schema.json`; each fixes identity, inputs, outputs,
+  allowed consumed capabilities, prohibited effects and hand-offs.
 - wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`; `Verb`, `Message`, `Grounding`, `Enforcement` re-exported from `interfaces.a2a_control`
 
 ## Profiles

@@ -1,0 +1,11 @@
+{
+  "id": "oversight-assessor",
+  "identity": "a2a-compliance/oversight-assessor",
+  "purpose": "Find the limiting term, autonomy ceiling and review material.",
+  "inputs": ["solver_verdict", "maker_state", "evidence_quality"],
+  "outputs": ["oversight_findings", "human_review_brief"],
+  "allowed_capabilities": ["tool:brief", "tool:collapse", "tool:escalation", "tool:falsifiability", "tool:mandate", "tool:proxy", "contract:oversight-ladder"],
+  "prohibited_effects": ["host_dispatch", "human_approval_substitution", "self_report_promotion"],
+  "handoff_to": ["conductor"],
+  "may_dispatch": false
+}

@@ -34,7 +34,10 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["a2a_compliance", "interfaces"]
+packages = ["a2a_compliance", "a2a_compliance.roles", "interfaces"]
+
+[tool.setuptools.package-data]
+a2a_compliance = ["roles/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

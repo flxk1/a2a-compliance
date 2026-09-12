@@ -1,0 +1,11 @@
+{
+  "id": "language-panel",
+  "identity": "a2a-compliance/language-panel",
+  "purpose": "Preserve factual, modal, normative and legal-language facets.",
+  "inputs": ["compiled_policy", "span_grounded_claims"],
+  "outputs": ["typed_language_facets"],
+  "allowed_capabilities": ["tool:factual_lower", "tool:epistemic_extract", "tool:deontic_parse", "tool:deontic_conflicts", "tool:topos_parse", "tool:norm_extract", "contract:loomground-legal", "skill:factual", "skill:epistemic", "skill:deontic", "skill:topos", "skill:norm"],
+  "prohibited_effects": ["host_dispatch", "final_verdict", "cross_plane_semantic_invention"],
+  "handoff_to": ["decision-verifier"],
+  "may_dispatch": false
+}

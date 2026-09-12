@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import json
+from importlib.resources import files
 from typing import Iterable, Optional
 
 from .governance_block import GovernanceBlock, SteerDecision, SteerRuling
@@ -53,6 +55,49 @@ class ComplianceRole:
     @property
     def repositories(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(c.repo for c in self.capabilities))
+
+
+@dataclass(frozen=True)
+class RoleManifest:
+    id: str
+    identity: str
+    purpose: str
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
+    allowed_capabilities: tuple[str, ...]
+    prohibited_effects: tuple[str, ...]
+    handoff_to: tuple[str, ...]
+    may_dispatch: bool
+
+    @classmethod
+    def from_dict(cls, value: dict) -> "RoleManifest":
+        required = {
+            "id", "identity", "purpose", "inputs", "outputs",
+            "allowed_capabilities", "prohibited_effects", "handoff_to",
+            "may_dispatch",
+        }
+        missing = required - value.keys()
+        if missing:
+            raise ValueError(f"role manifest missing {sorted(missing)}")
+        if value["may_dispatch"] is not False:
+            raise ValueError("compliance role manifests must set may_dispatch=false")
+        return cls(
+            id=value["id"], identity=value["identity"], purpose=value["purpose"],
+            inputs=tuple(value["inputs"]), outputs=tuple(value["outputs"]),
+            allowed_capabilities=tuple(value["allowed_capabilities"]),
+            prohibited_effects=tuple(value["prohibited_effects"]),
+            handoff_to=tuple(value["handoff_to"]), may_dispatch=False,
+        )
+
+
+def role_manifests() -> tuple[RoleManifest, ...]:
+    """Load the eight packaged, host-neutral role contracts."""
+    directory = files("a2a_compliance").joinpath("roles")
+    manifests = []
+    for path in sorted(directory.iterdir(), key=lambda p: p.name):
+        if path.name.endswith(".json"):
+            manifests.append(RoleManifest.from_dict(json.loads(path.read_text(encoding="utf-8"))))
+    return tuple(manifests)
 
 
 def _tool(repo: str, name: str, *, required: bool = True) -> Capability:
