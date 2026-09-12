@@ -54,6 +54,19 @@ from .grounding import (
     ACTION_HOLD,
     ACTION_ROUTE_HUMAN,
 )
+from .team import (
+    TeamProfile,
+    CapabilityKind,
+    Capability,
+    ComplianceRole,
+    COMPLIANCE_ROLES as TEAM_ROLES,
+    LOOMGROUND_REPOSITORIES,
+    CapabilityInventory,
+    ControlRequest,
+    RoleStep,
+    ControlPlan,
+    ComplianceTeam,
+)
 
 __all__ = [
     "Verb",
@@ -93,4 +106,15 @@ __all__ = [
     "ACTION_STEER",
     "ACTION_HOLD",
     "ACTION_ROUTE_HUMAN",
+    "TeamProfile",
+    "CapabilityKind",
+    "Capability",
+    "ComplianceRole",
+    "TEAM_ROLES",
+    "LOOMGROUND_REPOSITORIES",
+    "CapabilityInventory",
+    "ControlRequest",
+    "RoleStep",
+    "ControlPlan",
+    "ComplianceTeam",
 ]
