@@ -14,5 +14,15 @@
     "multi-agent",
     "values-alignment",
     "human-in-the-loop"
-  ]
+  ],
+  "mcpServers": {
+    "loomground": {
+      "command": "loomground-mcp",
+      "args": [
+        "serve",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
 }
