@@ -1,6 +1,6 @@
 # a2a-compliance
 
-> Control maker agents over an A2A protocol with role authority and optional Loomground value grounding.
+> Plan a governed maker action across the complete Loomground family, then control the maker over an A2A protocol. The dependency-free protocol floor remains available; the full-family profile fails closed.
 
 ## Problem
 Multi-agent runs have makers and overseers. Steering a maker needs a channel, a resolved authority, and the boundary that maker itself declares.
@@ -29,10 +29,14 @@ maker.checkpoint()
 - authority: `authorize(from_role, verb, maker_id, roster) → Authorization` · `Roster` · `COMPLIANCE_ROLES` · `MAKER_ROLES`; `halt` is reserved and dispatches on `confirm=True`
 - boundary: `GovernanceBlock.from_manifest(path).rule(kind) → SteerRuling(SteerDecision.STEER | ROUTE_HUMAN | REFUSE)`
 - grounding: `ground(GroundingContext) → GroundingResult` · `ALL_PLANES` · `available(plane)` · `accept_compiled_policy(payload)` ([docs/value-grounding.md](docs/value-grounding.md))
+- team: `ComplianceTeam.plan(ControlRequest) → ControlPlan` · `ComplianceTeam.assess(ControlRequest, GroundingResult) → ControlPlan`. Eight roles assign all 41 public family repositories exactly once and consume their published tools, skills, contracts, or distribution surfaces. `ready` means ready to begin those host-orchestrated hand-offs, never ready to dispatch. ([docs/compliance-team.md](docs/compliance-team.md))
 - wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`; `Verb`, `Message`, `Grounding`, `Enforcement` re-exported from `interfaces.a2a_control`
 
-## Family
-Runtime controls. Consumes nothing at runtime: `dependencies = []` in `pyproject.toml`, with `jsonschema` and `PyYAML` as optional extras. Each Loomground value plane is optional here and degrades instead of breaking — `available()` probes with `find_spec`, and an absent plane falls back to the advisory reading for that one dimension. External enforcement is a declared, host-neutral seam: `enforcement` serialises as JSON `null` until a host supplies an adapter. Consumed by ctrl-plane hosts as the `compliance-fleet` skill, and paired with the maker's own `skill-governance-block`. Design: [docs/spec.md](docs/spec.md). Modes, axes and invariants: [docs/modes.md](docs/modes.md).
+## Profiles
+- `protocol`: zero-dependency A2A channel and role authority; absent value planes remain honestly advisory.
+- `loomground`: inert compliance-team plan in the order `evidence → policy/languages → solver → oversight → A2A decision → runtime controls → host dispatch → assurance/reconciliation`. Missing required capability, missing assessment, `OPEN`, or a reserved act routes to the human. The team consumes existing family implementations; it does not reproduce them.
+
+Tool execution, human approval, dispatch, enforcement, erasure, certification and evidence writing remain host acts.
 
 Language: loomground — guide https://github.com/flxk1/loomground/blob/main/llms.txt (the .lg language an agent reads, emits, validates); catalogue https://github.com/flxk1/loomground/blob/main/CATALOGUE.json
-Skills: compliance-fleet
+Skills: compliance-fleet (`a2a_plan`, `a2a_ground`)
