@@ -216,10 +216,9 @@ class ControlPlan:
     obligations: tuple[str, ...]
     grounding_result: Optional[GroundingResult] = None
     recommended_action: str = ACTION_ROUTE_HUMAN
-
-    @property
-    def repository_coverage(self) -> frozenset[str]:
-        return LOOMGROUND_REPOSITORIES
+    repository_coverage: frozenset[str] = field(
+        default=LOOMGROUND_REPOSITORIES, init=False,
+    )
 
 
 class ComplianceTeam:
