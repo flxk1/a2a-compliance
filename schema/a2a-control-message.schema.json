@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/a2a-compliance/schema/a2a-control-message.schema.json",
   "title": "A2A compliance control message",
-  "description": "Interface-only (SPEC stage). The envelope for one agent-to-agent control message between a compliance agent and a maker. grounding is null in bare mode, populated when a loomground value plane is present; enforcement is null unless RVND is present. A receiver MUST ignore unknown fields and MUST NOT treat a null grounding/enforcement as failure. See SPEC.md §3.",
+  "description": "Interface-only (SPEC stage). The envelope for one agent-to-agent control message between a compliance agent and a maker. grounding is null in bare mode, populated when a loomground value plane is present; enforcement is null unless external enforcement is present. A receiver MUST ignore unknown fields and MUST NOT treat a null grounding/enforcement as failure. See SPEC.md §3.",
   "type": "object",
   "required": ["protocol", "id", "ts", "from", "to", "verb", "body", "authority"],
   "additionalProperties": true,
@@ -27,7 +27,7 @@
     },
     "enforcement": {
       "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/enforcement" } ],
-      "description": "null unless RVND is present"
+      "description": "null unless external enforcement is present"
     }
   },
   "$defs": {
@@ -45,7 +45,7 @@
     "authority": {
       "type": "object",
       "required": ["basis"],
-      "description": "who authorizes this message. basis 'role' is the hard footing; RVND (if present) sharpens it via the enforcement block.",
+      "description": "who authorizes this message. basis 'role' is the hard footing; external enforcement (if present) sharpens it via the enforcement block.",
       "properties": {
         "basis": { "enum": ["role"] },
         "role": { "type": "string" },
@@ -77,9 +77,9 @@
       "type": "object",
       "required": ["engine", "verdict"],
       "properties": {
-        "engine": { "const": "rvnd" },
+        "engine": { "type": "string", "minLength": 1 },
         "verdict": { "enum": ["permit", "hold", "deny"] },
-        "gate_verdict": { "enum": ["GO", "CONDITIONAL", "NO-GO"] },
+        "gate_verdict": { "enum": ["GO", "CONDITIONAL", "NO-GO", null] },
         "audit_id": { "type": ["string", "null"] },
         "advisory": { "type": "boolean", "description": "true = preview only, chain NOT written; false = enforced, chain written" }
       }

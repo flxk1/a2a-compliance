@@ -7,7 +7,7 @@ Moved out of the README under the family README canon. The full design is
 
 ## Two overriding invariants
 
-1. **Everything works WITHOUT RVND.** RVND is optional enrichment (an enforced
+1. **Everything works without external enforcement.** It is optional enrichment (an enforced
    permit/hold/deny verdict plus a signed-chain audit), never a dependency.
 2. **Every loomground repo is OPTIONAL and UNIVERSAL.** The fleet does not
    hard-depend on any loomground repo; it works without them and enriches when
@@ -16,7 +16,7 @@ Moved out of the README under the family README canon. The full design is
 
 The fleet's only hard footing is its own ctrl substrate: the A2A control channel
 plus the role-based authority of the ctrl team-charter roster. Loomground
-value-grounding and RVND enforcement are both optional planes on top.
+value-grounding and external enforcement are both optional planes on top.
 
 Grounding is optional-at-runtime but canonical-when-used: when the fleet grounds
 its criteria it uses loomground and never builds a parallel grounding layer; when
@@ -31,24 +31,24 @@ loomground is absent it degrades to role-based / advisory control.
         ┌───────────────────────┴───────────────────────┐
    AXIS A — the CHANNEL (A2A)               AXIS B — AUTHORITY (who may steer whom)
    ctrl / orchestration plane               role-based (team-charter) by default
-   complements MCP (MCP = agent<->tools;    RVND-gated + chained when RVND present
+   complements MCP (MCP = agent<->tools;    externally gated + chained when an adapter is present
    A2A = agent<->agent)
         ┌───────────────┴────────────────┐
    HARD FOOTING (bare)              OPTIONAL enrichment (both degrade, never crash)
    A2A channel + team-charter       loomground value graph (per-plane flags):
    role roster                      deontic·norm·mandate·escalation·proxy·falsifiability
-                                    RVND adapter (no-op when absent):
+                                    external enforcement adapter (no-op when absent):
                                     permit/hold/deny + signed chain
 ```
 
 ## Three modes
 
-- **(a) bare** — no loomground, no RVND. Steer criteria = the compliance role's
+- **(a) bare** — no loomground, no external enforcement. Steer criteria = the compliance role's
   advisory judgement; authority = role-based. Fully functional alone.
 - **(b) +loomground** — steer criteria are drawn from the grounded value graph
   (O/P/F deontic norms, mandate, escalation, proxy, falsifiability), per-plane,
   behind flags; advisory fallback per dimension when a plane is absent.
-- **(c) +RVND** — the directive is additionally enforced (permit/hold/deny) and
+- **(c) +external enforcement** — the directive is additionally enforced (permit/hold/deny) and
   written to the signed chain. Phase 3; a declared, flag-gated seam today, with
   `enforcement` serialised as `null` on every message the package emits.
 
@@ -76,7 +76,7 @@ loomground is absent it degrades to role-based / advisory control.
    steer/hold/escalate decision (`a2a_compliance.planes`,
    `a2a_compliance.grounding`); see [value-grounding.md](value-grounding.md).
 
-RVND enforcement (Phase 3) is design only.
+External enforcement (Phase 3) is design only.
 
 ## Seams
 
@@ -94,7 +94,7 @@ natural neutral complement to `skill-governance-block` (that declares a maker's
 boundary; this is the runtime control within it). SPEC §10 records the shape a
 neutral publication would take: a neutral `spec/` core plus a `bindings/` appendix
 (ctrl = the role-authority binding, loomground = the value-criterion binding,
-RVND = the enforcement binding).
+external enforcement = the enforcement binding).
 
 ## Repository layout
 

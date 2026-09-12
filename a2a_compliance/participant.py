@@ -8,7 +8,7 @@ pending directive.
 Honest limitation (SPEC §9, §11): this is a COOPERATIVE mechanism. A directive
 is delivered only when the maker reaches `checkpoint()`, and a `halt` is a
 cooperative stop at the next checkpoint — NOT a forced kill. A forced stop is a
-harness/RVND capability the bare protocol cannot promise. The maker's own loop
+harness/external enforcement capability the bare protocol cannot promise. The maker's own loop
 must consult `should_continue()` / `is_held()` and yield; a maker that never
 checkpoints cannot be steered by this shim.
 

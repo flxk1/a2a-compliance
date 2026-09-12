@@ -218,7 +218,7 @@ def _enforcement_from_wire(d: Optional[dict]) -> Optional[Enforcement]:
     if d is None:
         return None
     return Enforcement(
-        engine=d.get("engine", "rvnd"),
+        engine=d.get("engine", "external"),
         verdict=d.get("verdict", "permit"),
         gate_verdict=d.get("gate_verdict"),
         audit_id=d.get("audit_id"),

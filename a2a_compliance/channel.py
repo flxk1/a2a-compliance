@@ -3,9 +3,9 @@
 A compliance agent resolves authority role-first (§5.1), bounds a steer by the
 maker's declared governance block (§7), and dispatches a control message onto
 the A2A channel (the cooperative-poll inbox). In Phase 1 `grounding` and
-`enforcement` are always None — the loomground value seam (Phase 2) and the RVND
-adapter (Phase 3) are declared-but-inert. No `loomground_*` / `rvnd.*` import is
-on this path.
+`enforcement` are always None — the loomground value seam (Phase 2) and the
+external-enforcement adapter (Phase 3) are declared-but-inert. No enrichment
+provider is imported on this path.
 
 Reserved acts (`halt`; and any reserved kind in a maker's block) are surfaced to
 the human and NOT auto-dispatched — in every mode, regardless of enrichment.
@@ -171,7 +171,7 @@ class ComplianceAgent:
     ) -> DispatchResult:
         """Reserved act (§3.2, §5.1): halt is surfaced to the human before
         dispatch in EVERY mode. Without `confirm=True` (the human's approval) it
-        is surfaced and NOT dispatched. RVND, when present (Phase 3), would gate
+        is surfaced and NOT dispatched. External enforcement, when present (Phase 3), would gate
         it additionally; its absence does not lower this bar."""
         auth = self._authorize(Verb.HALT, maker)
         if not auth.allowed:

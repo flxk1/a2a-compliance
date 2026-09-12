@@ -11,7 +11,7 @@ NOT on the default import path. `import a2a_compliance` does not pull this in;
 callers opt in with `from a2a_compliance import harness` (or
 `from a2a_compliance.harness import HarnessTransport, SubprocessSpawner`). The
 cooperative-poll transport stays the default (SPEC invariant: optional +
-import-guarded); no `loomground_*` / `rvnd.*` import is on any path here.
+import-guarded); no enrichment provider is imported on any path here.
 
 Two honest tiers (SPEC §9):
 
@@ -326,7 +326,7 @@ class HarnessTransport:
 
     Satisfies the same put/poll transport seam as `FileInbox` (it delegates to an
     internal one), so it is a drop-in for `ComplianceAgent(inbox=...)` and
-    `ControlParticipant(inbox=...)` — the harness binds real send/stop WITHOUT
+    `ControlParticipant(inbox=...)` — the harness binds real send/stop without
     changing those callers. On top of put/poll it adds `spawn`/`deliver`/`stop`:
 
       - a maker it spawned  -> enforceable send (`deliver`) + real stop (`stop`);
