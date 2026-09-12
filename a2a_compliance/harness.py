@@ -28,9 +28,12 @@ Two honest tiers (SPEC §9):
 
 The `Spawner` Protocol is the driver SEAM. `SubprocessSpawner` is the real,
 testable default (a maker runs as a child process). `ClaudeHarnessSpawner` is a
-documented injection point for the Claude-Code harness (spawn ~ the Agent tool,
-stop ~ TaskStop) — those are host agent-tools, not a Python API, so it is a seam
-the host wires, NOT a working driver in this module.
+real driver for the Claude-Code harness, bound to callables the host injects
+(spawn ~ the Agent tool, stop ~ TaskStop, deliver ~ SendMessage) — those are
+host agent-tools, not a Python API, so this module drives them through injected
+callables rather than calling them itself, staying honest about what is
+enforceable (a real stop only when a stop_fn is wired) and what degrades to the
+cooperative file inbox.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Protocol, runtime_checkable
+from typing import Callable, ClassVar, Optional, Protocol, runtime_checkable
 
 from interfaces.a2a_control import Message
 from . import envelope as env
@@ -125,6 +128,11 @@ class SubprocessMakerHandle:
     _inbox: FileInbox
     compliance_actor: str = "compliance"
 
+    # how HarnessTransport.stop describes a stop of this handle, and whether that
+    # stop is a real forced stop (a child process can always be terminated).
+    mechanism: ClassVar[str] = "process-terminate"
+    enforceable: ClassVar[bool] = True
+
     def deliver(self, msg: Message) -> None:
         """Send a control message to the owned maker. It is drained at the
         maker's next checkpoint — same channel, same envelope as Phase 1."""
@@ -197,47 +205,104 @@ class SubprocessSpawner:
         )
 
 
-# --- the Claude-Code harness binding: a documented seam, NOT a driver ------
+# --- the Claude-Code harness binding: a real driver over injected host tools --
+
+@dataclass
+class ClaudeHarnessMakerHandle:
+    """Handle to a maker the Claude-Code harness owns. This module never calls
+    host tools itself — it wraps the callables the host injected:
+
+      - `deliver` routes a directive through `deliver_fn` (e.g. SendMessage), or
+        degrades to the cooperative file inbox when the host wired none (the
+        maker sees it at its next checkpoint) — never a silent drop;
+      - `stop` routes through `stop_fn` (e.g. TaskStop) and is `enforceable` ONLY
+        when a `stop_fn` was wired; with none it returns False — never a stop it
+        did not make;
+      - `is_alive` uses `alive_fn` when given, else assumes alive (the host does
+        not always expose liveness)."""
+
+    session_id: str
+    _agent_id: object
+    _inbox: FileInbox
+    _stop_fn: Optional[Callable[[object], object]] = None
+    _deliver_fn: Optional[Callable[[object, Message], object]] = None
+    _alive_fn: Optional[Callable[[object], object]] = None
+    compliance_actor: str = "compliance"
+
+    mechanism: ClassVar[str] = "host-stop"
+
+    @property
+    def enforceable(self) -> bool:
+        """A forced stop is only real when the host wired a `stop_fn`."""
+        return self._stop_fn is not None
+
+    def deliver(self, msg: Message) -> None:
+        if self._deliver_fn is not None:
+            self._deliver_fn(self._agent_id, msg)
+        else:
+            self._inbox.put(self.session_id, env.to_wire(msg))
+
+    def stop(self, *, timeout: float = 5.0) -> bool:
+        if self._stop_fn is None:
+            return False
+        return bool(self._stop_fn(self._agent_id))
+
+    def is_alive(self) -> bool:
+        if self._alive_fn is not None:
+            return bool(self._alive_fn(self._agent_id))
+        return True
+
 
 class ClaudeHarnessSpawner:
-    """Injection point for the Claude-Code harness — a documented SEAM, not a
-    working driver.
+    """`Spawner` driver for the Claude-Code host, bound to injected host tools.
 
-    On the Claude-Code host, spawn/stop are host AGENT-TOOLS, not a Python API:
-
-      - **spawn** ~ the **Agent** tool (launch a subagent / maker session), and
-      - **stop**  ~ **TaskStop** (stop a running background agent by id).
-
-    Those tools are invoked by the host model, not callable from inside this
-    process, so this class deliberately does NOT implement them. To wire the
-    Claude harness, inject callables that perform the host tool-calls:
+    On the Claude-Code host, spawn/stop/deliver are host AGENT-TOOLS, not a
+    Python API — spawn ~ **Agent**, stop ~ **TaskStop**, deliver ~ **SendMessage**
+    — so this module cannot call them itself. It drives them through callables
+    the host injects:
 
         spawner = ClaudeHarnessSpawner(
             spawn_fn=lambda spec: <host: Agent(...) -> agent_id>,
-            stop_fn=lambda agent_id: <host: TaskStop(agent_id)>,
+            stop_fn=lambda agent_id: <host: TaskStop(agent_id) -> truthy>,
             deliver_fn=lambda agent_id, msg: <host: SendMessage(agent_id, ...)>,
+            alive_fn=lambda agent_id: <host: is the agent still running?>,
         )
 
-    Absent that wiring, `spawn()` raises to keep the seam honest — an
-    unimplemented harness must fail loudly, never silently pretend to own a
-    live session. Even wired, `deliver` to a live session is bounded by what the
-    host exposes: the harness does not generally expose arbitrary live
-    cross-session messaging, so mid-run delivery may still degrade to the
-    cooperative file-inbox checkpoint (SPEC §9)."""
+    `spawn()` returns a `ClaudeHarnessMakerHandle` bound to those callables. With
+    no `spawn_fn` it raises — an unwired harness fails loudly, never pretends to
+    own a live session. `stop` is enforceable only when `stop_fn` is wired;
+    `deliver` degrades to the cooperative file inbox when `deliver_fn` is not,
+    because the host does not always expose live cross-session messaging (SPEC
+    §9). Only `spawn_fn` is required to drive; the rest bound what the handle can
+    honestly do."""
 
-    def __init__(self, *, spawn_fn=None, stop_fn=None, deliver_fn=None):
+    def __init__(self, *, spawn_fn=None, stop_fn=None, deliver_fn=None, alive_fn=None):
         self._spawn_fn = spawn_fn
         self._stop_fn = stop_fn
         self._deliver_fn = deliver_fn
+        self._alive_fn = alive_fn
 
     def spawn(self, spec: MakerSpec) -> MakerHandle:
         if self._spawn_fn is None:
             raise NotImplementedError(
-                "ClaudeHarnessSpawner is a seam: inject spawn_fn/stop_fn/"
-                "deliver_fn that call the host Agent / TaskStop / SendMessage "
-                "tools. It is intentionally not a working in-module driver."
+                "ClaudeHarnessSpawner needs a spawn_fn that calls the host Agent "
+                "tool; inject spawn_fn/stop_fn/deliver_fn/alive_fn to drive it."
             )
-        return self._spawn_fn(spec)  # pragma: no cover — host-wired path
+        if spec.inbox_root is None:
+            raise ValueError(
+                "MakerSpec.inbox_root is required so the cooperative deliver "
+                "fallback has a channel (HarnessTransport.spawn fills it in)."
+            )
+        agent_id = self._spawn_fn(spec)
+        return ClaudeHarnessMakerHandle(
+            session_id=spec.session_id,
+            _agent_id=agent_id,
+            _inbox=FileInbox(spec.inbox_root),
+            _stop_fn=self._stop_fn,
+            _deliver_fn=self._deliver_fn,
+            _alive_fn=self._alive_fn,
+            compliance_actor=spec.compliance_actor,
+        )
 
 
 # --- the transport: owned enforceable send/stop + cooperative fallback -----
@@ -338,11 +403,19 @@ class HarnessTransport:
         h = self._handles.get(session_id)
         if h is not None and h.is_alive():
             terminated = h.stop(timeout=timeout)
+            enforceable = bool(getattr(h, "enforceable", True))
+            mechanism = getattr(h, "mechanism", "process-terminate")
+            note = (
+                f"owned maker: stopped via {mechanism}"
+                if enforceable
+                else "owned maker but no forced stop wired (no stop_fn): not "
+                "enforceable — deliver a cooperative halt instead"
+            )
             return StopResult(
-                enforceable=True,
-                mechanism="process-terminate",
+                enforceable=enforceable,
+                mechanism=mechanism,
                 terminated=terminated,
-                note="owned maker: child process terminated",
+                note=note,
             )
         # Non-owned (or already-dead) maker: cooperative fallback only.
         if cooperative_halt is not None:
