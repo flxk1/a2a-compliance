@@ -52,7 +52,7 @@ out: edit   decision=steer        dispatched=True  verb=issue-directive
 
 ## Family
 
-Runtime controls. Consumes nothing at runtime: `dependencies = []` in `pyproject.toml`, with `jsonschema` and `PyYAML` as optional extras. Each loomground value plane is optional here and degrades instead of breaking — `available()` probes with `find_spec`, and an absent plane falls back to the advisory reading for that one dimension. RVND is a declared seam: `enforcement` serialises as JSON `null`. Consumed by ctrl-plane hosts as the `compliance-fleet` skill, and paired with the maker's own `skill-governance-block`. Design: [SPEC.md](SPEC.md). Modes, axes and invariants: [docs/modes.md](docs/modes.md).
+Runtime controls. Consumes nothing at runtime: `dependencies = []` in `pyproject.toml`, with `jsonschema` and `PyYAML` as optional extras. Each loomground value plane is optional here and degrades instead of breaking — `available()` probes with `find_spec`, and an absent plane falls back to the advisory reading for that one dimension. RVND is a declared seam: `enforcement` serialises as JSON `null`. Consumed by ctrl-plane hosts as the `compliance-fleet` skill, and paired with the maker's own `skill-governance-block`. Design: [docs/spec.md](docs/spec.md). Modes, axes and invariants: [docs/modes.md](docs/modes.md).
 
 ## Status
 
