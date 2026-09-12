@@ -31,6 +31,7 @@ maker.checkpoint()
 - grounding: `ground(GroundingContext) → GroundingResult` · `ALL_PLANES` · `available(plane)` · `accept_compiled_policy(payload)` ([docs/value-grounding.md](docs/value-grounding.md))
 - team: `ComplianceTeam.plan(ControlRequest) → ControlPlan` · `ComplianceTeam.assess(ControlRequest, GroundingResult) → ControlPlan`. Eight roles assign all 41 public family repositories exactly once and consume their published tools, skills, contracts, or distribution surfaces. `ready` means ready to begin those host-orchestrated hand-offs, never ready to dispatch. ([docs/compliance-team.md](docs/compliance-team.md))
 - role contracts: `role_manifests()` loads eight packaged `a2a_compliance/roles/*.json` manifests; `schema/compliance-role.schema.json` validates identity, inputs, outputs, allowed capabilities, prohibited effects and hand-offs. Every role sets `may_dispatch: false`.
+- lifecycle: `enforce_preview(plan, receipts)` requires digest-bound receipts from the owning roles and returns only `admitted`, `hold`, `route-human`, or `refuse`; `reconcile(plan, preview, control_receipt, receipts)` consumes postflight receipts and cannot certify a dispatch without a matching prior admission. Neither function calls a tool or performs an effect. ([docs/lifecycle.md](docs/lifecycle.md))
 - wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`; `Verb`, `Message`, `Grounding`, `Enforcement` re-exported from `interfaces.a2a_control`
 
 ## Profiles

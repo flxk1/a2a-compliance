@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import hashlib
 import json
 from importlib.resources import files
 from typing import Iterable, Optional
@@ -261,6 +262,7 @@ class ControlPlan:
     obligations: tuple[str, ...]
     grounding_result: Optional[GroundingResult] = None
     recommended_action: str = ACTION_ROUTE_HUMAN
+    action_digest: str = ""
     repository_coverage: frozenset[str] = field(
         default=LOOMGROUND_REPOSITORIES, init=False,
     )
@@ -321,6 +323,16 @@ class ComplianceTeam:
         else:
             disposition = grounding_result.recommended_action if grounding_result else "advisory"
 
+        action_subject = {
+            "maker_id": request.context.maker_id,
+            "target_kind": request.target_kind,
+            "proposed_action": request.context.proposed_action,
+        }
+        action_digest = hashlib.sha256(json.dumps(
+            action_subject, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")).hexdigest()
+
         return ControlPlan(
             profile=request.profile,
             maker_id=request.context.maker_id,
@@ -335,6 +347,7 @@ class ComplianceTeam:
             grounding_result=grounding_result,
             recommended_action=(grounding_result.recommended_action
                                 if grounding_result else ACTION_ROUTE_HUMAN),
+            action_digest=action_digest,
         )
 
     def assess(self, request: ControlRequest, grounding_result: GroundingResult) -> ControlPlan:
