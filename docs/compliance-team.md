@@ -41,6 +41,10 @@ data/spec contract, or a distribution surface.
 - Only the dependency-free `protocol` profile may produce a role-advisory plan
   without family capabilities.
 
+`ready` means that the host may begin the named orchestration hand-offs. It is
+not a permit, not proof that those capabilities succeeded, and never means
+ready-to-dispatch.
+
 The host may execute a plan only after resolving these gates. Tool execution,
 human approval, maker dispatch, enforcement, erasure and evidence writing remain
 explicit host responsibilities.
