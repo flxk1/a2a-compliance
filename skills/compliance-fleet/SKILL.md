@@ -10,6 +10,7 @@ description: >-
   dimension when that plane is absent. External enforcement is an optional adapter that adds a verdict and a signed
   chain to a directive. Triggers on "control my agents", "keep the makers aligned", "steer/hold/halt this
   maker", "watch the fleet for value drift", "issue a compliance directive".
+allowed-tools: a2a_ground
 governance:
   grade: L1
   actions:
@@ -42,6 +43,11 @@ governance:
 ---
 
 # compliance-fleet
+
+Primary path: call `a2a_ground` with the maker state and the requested value
+planes. It returns the grounded/advisory findings and the bounded action. Message
+dispatch remains a host act: the skill must surface reserved directives instead
+of sending them through an undeclared channel.
 
 The A2A control-message contract (both directions, all three modes), the maker
 control-participant contract, the value-plane consumption seam, the
