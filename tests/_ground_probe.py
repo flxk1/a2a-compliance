@@ -9,8 +9,9 @@ one place loomground is actually imported and consumed.
 Usage: ``python _ground_probe.py <spec.json>`` -> prints one JSON result line.
 
 Spec keys (all optional):
-  add_src        bool  — add the on-disk src of the not-installed planes to sys.path,
-                         so ALL SIX planes are importable (full real-consume demo).
+  add_src        bool  — add the on-disk src of every plane the grounding reads, and of
+                         what those planes import, to sys.path, so ALL SIX are importable
+                         from a checkout that has none of them installed (full real-consume).
   disable        str   — value for A2A_DISABLE_PLANES ("all" or a comma list).
   compile_policy str   — compile this prose via policy-compiler; use its
                          to_grounding_seam() as the policy (the compile->ground chain).
@@ -37,7 +38,10 @@ def main() -> None:
 
     # Optionally make the not-installed planes importable from their on-disk src.
     if spec.get("add_src"):
-        for plane in ("mandate", "escalation", "falsifiability"):
+        # every plane the grounding reads, plus what those planes import themselves
+        # (mandate, escalation and falsifiability import loomground_solver)
+        for plane in ("deontic", "norm", "proxy", "mandate", "escalation", "falsifiability",
+                      "solver", "governance"):
             src = PROJECTS / "loomground-repos" / f"loomground-{plane}" / "src"
             if src.is_dir():
                 sys.path.insert(0, str(src))
