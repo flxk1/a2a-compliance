@@ -11,7 +11,7 @@ description: >-
   dimension when that plane is absent. External enforcement is an optional adapter that adds a verdict and a signed
   chain to a directive. Triggers on "control my agents", "keep the makers aligned", "steer/hold/halt this
   maker", "watch the fleet for value drift", "issue a compliance directive".
-allowed-tools: a2a_ground
+allowed-tools: a2a_plan a2a_ground
 governance:
   grade: L1
   actions:
@@ -45,8 +45,10 @@ governance:
 
 # compliance-fleet
 
-Primary path: call `a2a_ground` with the maker state and the requested value
-planes. It returns the grounded/advisory findings and the bounded action. Message
+Primary full-family path: call `a2a_plan` with the maker state, target action kind
+and declared governance block. It returns the eight-role orchestration plan and
+the bounded grounding result over the MCP server's published capability surface.
+Use `a2a_ground` for the narrower six-plane derivation. Message
 dispatch remains a host act: the skill must surface reserved directives instead
 of sending them through an undeclared channel.
 
