@@ -25,7 +25,7 @@ import os
 import sys
 from pathlib import Path
 
-PROJECTS = Path(__file__).resolve().parents[2]
+PROJECTS = next((p for p in Path(__file__).resolve().parents if (p / "loomground-repos").is_dir()), Path(__file__).resolve().parents[2])
 REPO = Path(__file__).resolve().parents[1]
 
 
