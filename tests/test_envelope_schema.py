@@ -1,6 +1,6 @@
 """Envelope + verb contract, schema validation, null-plane semantics (SPEC §3)."""
 
-from a2a_compliance import Verb, Party, Authority, envelope as env, schema
+from a2a_compliance import Enforcement, Verb, Party, Authority, envelope as env, schema
 
 
 def _auth():
@@ -69,6 +69,24 @@ def test_grounding_and_enforcement_null_in_phase1():
     wire = env.to_wire(m)
     assert wire["grounding"] is None and wire["enforcement"] is None
     assert schema.validate(wire) == []
+
+
+def test_enforcement_engine_is_host_neutral():
+    comp = _party("comp1", "grounding")
+    maker = _party("m1", "maker")
+    message = env.new_message(
+        from_=comp,
+        to=maker,
+        verb=Verb.ISSUE_DIRECTIVE,
+        body=env.issue_directive_body("narrow scope", "constrain"),
+        authority=_auth(),
+    )
+    message.enforcement = Enforcement(engine="acme-gate", verdict="permit")
+
+    wire = env.to_wire(message)
+
+    assert schema.validate(wire) == []
+    assert env.from_wire(wire).enforcement.engine == "acme-gate"
 
 
 def test_receiver_does_not_treat_null_planes_as_failure():

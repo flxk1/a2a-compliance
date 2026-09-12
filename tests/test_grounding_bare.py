@@ -15,7 +15,7 @@ def _loomground_modules():
     return [
         n for n in sys.modules
         if n.split(".", 1)[0].startswith("loomground_")
-        or n.split(".", 1)[0] in ("loomground", "deontic", "rvnd")
+        or n.split(".", 1)[0] in ("loomground", "deontic")
     ]
 
 

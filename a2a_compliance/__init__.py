@@ -11,11 +11,11 @@ Implements the SPEC's Phase 1 and Phase 2 scope (SPEC §12.1-2):
 - per-plane loomground value consumption and the grounded steer/hold/escalate
   decision — `planes`, `grounding`.
 
-Works with ZERO loomground and ZERO RVND: each loomground plane degrades to the
+Works with zero Loomground and zero external enforcement: each Loomground plane degrades to the
 bare advisory/role reading when absent, and no `loomground_*` import happens
-until a present plane is actually consumed. RVND enforcement (Phase 3) is a
-declared, flag-gated seam (`enforcement=None` until an adapter lands); no
-`rvnd.*` import is on this path.
+until a present plane is actually consumed. External enforcement (Phase 3) is a
+declared, flag-gated seam (`enforcement=None` until an adapter lands); no host
+enforcer is imported on this path.
 """
 
 from interfaces.a2a_control import (

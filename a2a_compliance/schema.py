@@ -2,7 +2,7 @@
 
 Validates an on-wire message dict against
 `schema/a2a-control-message.schema.json`. `jsonschema` is an ordinary universal
-dependency (NOT loomground/RVND); its import is still guarded so that a checkout
+dependency (NOT loomground/external enforcement); its import is still guarded so that a checkout
 without it degrades to a minimal structural check rather than crashing the
 control path — validation is a check layer, not the load-bearing channel.
 """

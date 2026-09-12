@@ -1,7 +1,7 @@
 {
   "name": "a2a-compliance",
   "version": "0.1.0",
-  "description": "An A2A (agent-to-agent) compliance-control protocol + a loomground-grounded compliance-fleet contract: compliance agents steer maker agents to keep them aligned to the operator's values, over query-state/issue-directive/hold/resume/halt (and report-state/ack/escalate back). Works fully with zero loomground and zero RVND; loomground value-grounding and RVND enforcement are both optional, universal enrichment planes.",
+  "description": "Control maker agents over an A2A protocol with role authority and optional Loomground value grounding.",
   "author": {
     "name": "Loomground Contributors"
   },

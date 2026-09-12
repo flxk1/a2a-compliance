@@ -6,8 +6,8 @@ the maker control-participant contract (SPEC §9), and the authority model
 not the implementation.
 
 Three modes (SPEC §2): (a) bare = role advisory; (b) +loomground = grounded
-criteria; (c) +RVND = enforced verdict + chain. `grounding` and `enforcement`
-are additive envelope planes — None in the modes that lack them.
+criteria; (c) +external enforcement = enforced verdict + chain. `grounding` and
+`enforcement` are additive envelope planes — None in the modes that lack them.
 """
 
 from __future__ import annotations
@@ -51,8 +51,8 @@ class Party:
 
 @dataclass
 class Authority:
-    """Axis B (SPEC §5). basis='role' is the hard footing; RVND sharpens via
-    Enforcement, it does not replace this."""
+    """Axis B (SPEC §5). basis='role' is the hard footing; external enforcement
+    sharpens it via Enforcement, it does not replace this."""
     basis: str = "role"
     role: Optional[str] = None
     oversees: Optional[str] = None
@@ -78,9 +78,10 @@ class PlaneFinding:
 
 @dataclass
 class Enforcement:
-    """Optional (SPEC §6). None unless RVND is present. advisory=True => preview
-    only (chain NOT written); advisory=False => enforced (chain written)."""
-    engine: str = "rvnd"
+    """Optional (SPEC §6). None unless external enforcement is present.
+    advisory=True => preview only (chain NOT written); advisory=False =>
+    enforced (chain written)."""
+    engine: str = "external"
     verdict: str = "permit"        # permit|hold|deny
     gate_verdict: Optional[str] = None  # GO|CONDITIONAL|NO-GO
     audit_id: Optional[str] = None
@@ -132,9 +133,9 @@ class MakerParticipant(Protocol):
 
 class ComplianceChannel(Protocol):
     """The compliance agent's send side. Authority is resolved role-first
-    (SPEC §5.1); RVND enrichment, if present, is applied by the adapter before
-    dispatch (SPEC §6). None of these methods fail because an enrichment plane
-    is absent."""
+    (SPEC §5.1); external enforcement enrichment, if present, is applied by the
+    adapter before dispatch (SPEC §6). None of these methods fail because an
+    enrichment plane is absent."""
 
     def query_state(self, maker: str, include: list[str]) -> Message: ...
     def issue_directive(self, maker: str, instruction: str, kind: str,

@@ -1,7 +1,7 @@
 """Role-based authority — Axis B, the hard footing (SPEC §5.1).
 
 Answers: may THIS compliance role issue THIS verb to THIS maker? Authority is
-independent of the channel and needs neither loomground nor RVND. It derives
+independent of the channel and needs neither loomground nor external enforcement. It derives
 from the ctrl team-charter roster: the persistent compliance/core roles oversee
 the fresh-hire maker sessions.
 

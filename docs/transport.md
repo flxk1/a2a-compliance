@@ -11,7 +11,7 @@ directive is delivered only when the maker reaches `ControlParticipant.checkpoin
 and a `halt` is a cooperative stop at the next checkpoint — not a forced kill. The
 maker's own loop must consult `should_continue()` / `is_held()` and yield. A maker
 that never checkpoints cannot be steered by this shim. A forced or instant stop is a
-harness- or RVND-level capability the bare protocol does not promise; the shim is
+harness- or external enforcement-level capability the bare protocol does not promise; the shim is
 written so it can bind to a real harness send/stop primitive later without changing
 callers.
 

@@ -15,7 +15,7 @@ defeasible); when ungrounded, they fall back to role-based / advisory control.
 
 ## 0. Two overriding invariants (non-negotiable — this SPEC is written to both)
 
-1. **Everything works WITHOUT RVND.** RVND is *optional enrichment* (an enforced
+1. **Everything works without external enforcement.** It is *optional enrichment* (an enforced
    permit / hold / deny verdict plus a signed-chain audit) — never a dependency.
    The bare fleet (A2A channel + role authority) is fully functional alone.
 
@@ -28,10 +28,10 @@ defeasible); when ungrounded, they fall back to role-based / advisory control.
      host-agnostic. The fleet consumes each as a *general capability* through a
      stable interface, never as a fleet-specific fork.
 
-   ⇒ **No "required" edge to Loomground or RVND is specified.** The fleet's ONLY
+   ⇒ **No "required" edge to Loomground or external enforcement is specified.** The fleet's only
    hard footing is its own **ctrl substrate**: the A2A control channel + the
    role-based authority of the ctrl team-charter roster. Loomground
-   value-grounding AND RVND enforcement are BOTH optional enrichment planes on
+   value-grounding and external enforcement are both optional enrichment planes on
    top.
 
 **Reconciliation with "loomground-first" (so this is not read as contradicting
@@ -63,11 +63,11 @@ A2A **complements MCP**, it does not replace it. The division of labour:
 
 | channel | endpoints | granularity | governed by |
 |---|---|---|---|
-| **MCP** | agent ↔ tools | one **action** at a time | RVND (when present) gates the action |
+| **MCP** | agent ↔ tools | one **action** at a time | an external adapter (when present) gates the action |
 | **A2A** | agent ↔ agent (compliance ↔ maker) | the **fleet** / a maker's trajectory | ctrl coordinates; role authority steers |
 
 MCP is where an individual action is planned/gated; A2A is where one agent
-steers another. RVND lives on the MCP side (per-action verdicts) and, optionally,
+steers another. External enforcement lives on the MCP side (per-action verdicts) and, optionally,
 enriches the A2A side (per-directive verdicts + chain) — see §6.
 
 ### Axis B — AUTHORITY is who may steer whom
@@ -79,7 +79,7 @@ issue this directive to this maker?
   persistent core / compliance roles (`policy-compliance`, `grounding`,
   `verify`) oversee the maker (fresh-hire) sessions. No enrichment needed. This
   is the fleet's hard footing.
-- **Enriched (RVND present):** the directive is additionally RVND-gated
+- **Enriched (external enforcement present):** an adapter additionally gates the directive
   (permit / hold / deny) and written to the signed chain. Additive only.
 
 Keeping A and B separate means: the *channel* works identically in all three
@@ -95,12 +95,12 @@ fully functional standalone.
 
 | mode | value criteria come from | authority | audit |
 |---|---|---|---|
-| **(a) bare** — no loomground, no RVND | the compliance **role's** advisory judgement (charter roles) | role-based (team-charter) | none (advisory record only) |
+| **(a) bare** — no loomground, no external enforcement | the compliance **role's** advisory judgement (charter roles) | role-based (team-charter) | none (advisory record only) |
 | **(b) +loomground** | the **grounded value graph** (O/P/F deontic norms, mandate, escalation, proxy, falsifiability) | role-based (team-charter) | none (advisory record only) |
-| **(c) +RVND** | as (a) or (b), plus | RVND permit/hold/deny **enforces** the directive | signed chain receipt |
+| **(c) +external enforcement** | as (a) or (b), plus | an adapter **enforces** a permit/hold/deny verdict | signed chain receipt |
 
 - **(a) is the floor and it is complete.** A compliance agent with neither
-  loomground nor RVND still queries maker state, forms an *advisory* steer/hold
+  loomground nor external enforcement still queries maker state, forms an *advisory* steer/hold
   from its role's judgement (e.g. "this maker's trajectory looks off-mandate to
   the `policy-compliance` role"), issues the directive on the A2A channel, and
   the maker honours it. No op returns an error *because* an enrichment plane is
@@ -109,9 +109,9 @@ fully functional standalone.
   to me" into "violates obligation `O(bearer,action)` version `v`, evidence
   `…`". Same directive, same channel; a *grounded* reason replaces an *advisory*
   one.
-- **(c) sharpens the authority.** RVND turns "the role is allowed to steer" into
+- **(c) sharpens the authority.** External enforcement turns "the role is allowed to steer" into
   "this specific directive is permitted / held / denied, and here is the
-  chained receipt". A `deny` blocks dispatch; absence of RVND means the directive
+  chained receipt". A `deny` blocks dispatch; absence of external enforcement means the directive
   dispatches on role authority alone.
 
 ---
@@ -137,7 +137,7 @@ description.
   "body": { ... },                     // verb-specific
   "authority": { ... },                // see §5 — how this message is authorized
   "grounding": { ... } | null,         // see §4 — the grounded criterion, if any
-  "enforcement": { ... } | null        // see §6 — RVND verdict/receipt, if any
+  "enforcement": { ... } | null        // see §6 — external enforcement verdict/receipt, if any
 }
 ```
 
@@ -149,20 +149,20 @@ description.
 
 ### 3.2 compliance → maker verbs
 
-| verb | body (shape) | semantics | bare (a) | +loomground (b) | +RVND (c) |
+| verb | body (shape) | semantics | bare (a) | +loomground (b) | +external enforcement (c) |
 |---|---|---|---|---|---|
 | `query-state` | `{ include: ["mandate","trajectory","tools","claims"] }` | ask the maker to report its current state | maker returns `report-state` | same | same |
-| `issue-directive` | `{ instruction: str, kind: "correct"\|"constrain"\|"redirect", reason_ref }` | steer the maker's behaviour within its declared boundary (§7) | reason is the role's advisory judgement | `reason_ref` points at a grounded criterion (§4) | directive is RVND-gated before dispatch (§6) |
-| `hold` | `{ scope: "next-action"\|"session", reason_ref, conditions?: [str] }` | soft-suspend the maker until `resume`/conditions met | advisory hold: coordination signal, no teeth | grounded reason attached | enforced hold if RVND `hold`/`deny` |
-| `resume` | `{ hold_ref, note? }` | lift a prior hold | dispatched on role authority | same | RVND-gated (was the hold enforced?) |
-| `halt` | `{ reason_ref, scope: "session", irreversible: true }` | stop the maker (reserved act) | **always** surfaced to the human first (§5, §8) | grounded reason attached | RVND-gated + chained |
+| `issue-directive` | `{ instruction: str, kind: "correct"\|"constrain"\|"redirect", reason_ref }` | steer the maker's behaviour within its declared boundary (§7) | reason is the role's advisory judgement | `reason_ref` points at a grounded criterion (§4) | adapter gates the directive before dispatch (§6) |
+| `hold` | `{ scope: "next-action"\|"session", reason_ref, conditions?: [str] }` | soft-suspend the maker until `resume`/conditions met | advisory hold: coordination signal, no teeth | grounded reason attached | adapter may enforce `hold`/`deny` |
+| `resume` | `{ hold_ref, note? }` | lift a prior hold | dispatched on role authority | same | adapter verifies that an enforced hold may be lifted |
+| `halt` | `{ reason_ref, scope: "session", irreversible: true }` | stop the maker (reserved act) | **always** surfaced to the human first (§5, §8) | grounded reason attached | adapter-gated + chained |
 
 - **`issue-directive` is the missing steer primitive** the ctrl-desk `steer` op
   needs (§8). Today the desk's `steer` bottoms out as *recorded intent*; an
   `issue-directive` message is the live send the maker honours.
 - **`halt` is a reserved act in every mode.** Irreversible fleet-level steers are
-  surfaced to the human for confirmation regardless of loomground/RVND presence,
-  per the ctrl oversight rules. RVND, when present, additionally gates it; its
+  surfaced to the human for confirmation regardless of loomground/external enforcement presence,
+  per the ctrl oversight rules. External enforcement, when present, additionally gates it; its
   absence does not lower the bar.
 
 ### 3.3 maker → compliance verbs
@@ -182,7 +182,7 @@ description.
 ### 3.4 Mode-behaviour invariant
 
 Every verb is **total in mode (a)**: it has a complete, useful meaning with
-neither loomground nor RVND. `grounding` and `enforcement` are additive envelope
+neither loomground nor external enforcement. `grounding` and `enforcement` are additive envelope
 planes; a receiver that sees them `null` behaves exactly as the bare protocol
 specifies.
 
@@ -284,7 +284,7 @@ maker*. It is independent of the channel (§1, Axis B).
   act** surfaced to the human (charter oversight rule: *the team never decides
   over the human's head*).
 - This is the **only** hard-required authority substrate. It needs neither
-  loomground nor RVND.
+  loomground nor external enforcement.
 
 The `authority` envelope block in mode (a):
 
@@ -293,24 +293,23 @@ The `authority` envelope block in mode (a):
                "oversees": "<maker-id>", "reserved": false }
 ```
 
-### 5.2 Enriched — RVND-gated
+### 5.2 Enriched — externally gated
 
-When RVND is present, the directive is additionally put to RVND's plan/gate
+When an external-enforcement adapter is present, the directive is put to its gate
 before dispatch; the `authority` block carries the verdict and the directive is
-written to the signed chain (§6). RVND *sharpens* role authority into an enforced
+written to the signed chain (§6). External enforcement *sharpens* role authority into an enforced
 permit/hold/deny; it never replaces the role basis, and its absence leaves the
 role basis fully in force.
 
 ---
 
-## 6. RVND enrichment (optional, flag-gated, no-op when absent)
+## 6. External-enforcement enrichment (optional, flag-gated, no-op when absent)
 
-RVND enriches the A2A directive path exactly as it enriches the ctrl-desk
-`steer` op. A single adapter module is the **only** place `rvnd.*` is referenced;
-it no-ops to an "absent" sentinel when RVND is unimportable.
+An external host may enrich the A2A directive path through one adapter module.
+The adapter returns an "absent" sentinel when no enforcer is configured.
 
-- **On `issue-directive` / `hold` / `halt`:** if `rvnd.available()`, the
-  directive is put to the RVND gate → `permit` | `hold` | `deny`
+- **On `issue-directive` / `hold` / `halt`:** if an adapter is available, the
+  directive is put to the adapter's gate → `permit` | `hold` | `deny`
   (GO / CONDITIONAL / NO-GO). `deny` blocks dispatch; `hold` returns conditions;
   `permit` dispatches and attaches a chained `audit_id`. If not available, the
   directive dispatches on role authority alone (§5.1) and `enforcement` is
@@ -320,7 +319,7 @@ it no-ops to an "absent" sentinel when RVND is unimportable.
   *enforce* call (writes the chain, yields `audit_id`) is an explicit,
   human-surfaced step. This keeps even the enriched path honest about when state
   is mutated.
-- **Planes RVND adds to a directive record:** `witnessed` (the chain's own
+- **Planes an external adapter adds to a directive record:** `witnessed` (the chain's own
   GO/CONDITIONAL/NO-GO verdict for the action) and the signed-chain tail. These
   are additive facts beside the maker's self-report and the fleet's advisory /
   grounded finding — **tiers are never fused** (a self-report is never rendered
@@ -329,7 +328,7 @@ it no-ops to an "absent" sentinel when RVND is unimportable.
 The `enforcement` envelope block in mode (c):
 
 ```
-"enforcement": { "engine": "rvnd", "verdict": "permit"|"hold"|"deny",
+"enforcement": { "engine": "external", "verdict": "permit"|"hold"|"deny",
                  "gate_verdict": "GO"|"CONDITIONAL"|"NO-GO",
                  "audit_id": "<id|null>", "advisory": true|false }
 ```
@@ -352,9 +351,9 @@ consumes the block; it does not redefine it.**
   criteria on the maker's release.
 - A directive that would push a maker outside its declared boundary is itself
   refused by the compliance agent (the block is the outer envelope; A2A steers
-  inside it). Where RVND is present, the same block compiles to the `.lg` patch
-  RVND enforces at action-time — one declaration, read plan-time by the
-  compliance agent and enforced action-time by RVND, so they cannot disagree
+  inside it). Where external enforcement is present, the same block compiles to
+  the `.lg` patch enforced at action time — one declaration, read at plan time by
+  the compliance agent and enforced by the adapter, so the two cannot disagree
   (governance-block SPEC §1).
 - The block is itself **universal / vendor-neutral** — the same ethos as this
   protocol (see §10). The seam is: *A2A directive ⊆ the maker's declared
@@ -422,7 +421,7 @@ halt(msg)              -> ack{halted}               # stop on a halt directive
      live session, the shim binds to it and `halt` becomes immediate.
 - The shim is **honestly labelled**: in mode (a) a `halt` is a *cooperative*
   stop (the maker honours it at its next checkpoint), not a forced kill. A forced
-  stop is a harness/RVND capability, not something the bare protocol can promise.
+  stop is a harness/external enforcement capability, not something the bare protocol can promise.
 
 ---
 
@@ -433,7 +432,7 @@ spec, a sibling to `skill-governance-block`.** The argument:
 
 1. **The universal ethos is already the design.** Invariant 2 makes every
    loomground plane an *optional, universal* capability behind a stable
-   interface, and invariant 1 makes RVND an *optional* enrichment. A protocol
+   interface, and invariant 1 makes external enforcement an *optional* enrichment. A protocol
    whose every enrichment is optional and interface-mediated is, by construction,
    not bound to any one vendor.
 2. **It composes with a neutral sibling.** `skill-governance-block` is already
@@ -444,14 +443,14 @@ spec, a sibling to `skill-governance-block`.** The argument:
    control within it.*
 3. **The normative core names no product.** The message contract (§3), authority
    model (§5), and maker participant contract (§9) are expressible without
-   naming ctrl, loomground, or RVND. Those three appear only as **bindings**: ctrl
+   naming ctrl, loomground, or external enforcement. Those three appear only as **bindings**: ctrl
    as the reference orchestrator/roster, loomground as the reference value-graph,
-   RVND as the reference enforcer.
+   external enforcement as the reference enforcer.
 
 **Consequence for the layout (mirrors skill-governance-block):** a neutral
 `spec/` core (verbs, envelope, participant contract, authority, three-mode
 degradation) + a `bindings/` appendix (one binding each: ctrl team-charter as the
-role-authority binding, loomground planes as the value-criterion binding, RVND as
+role-authority binding, loomground planes as the value-criterion binding, and external enforcement as
 the enforcement binding). This SPEC.md is the working design; the neutral split
 is the recommended shape at publication (a reserved act — not performed here).
 
@@ -460,7 +459,7 @@ is the recommended shape at publication (a reserved act — not performed here).
 ## 11. Plane manifest (topology gate)
 
 Per `repo-standards/topology.md`: `a2a-compliance` is an **orchestration-plane**
-capability (it coordinates the fleet; the fleet's actions are what RVND governs
+capability (it coordinates the fleet; the fleet's actions are what external enforcement governs
 and what loomground grounds). Dependency direction points *toward the base* —
 nothing depends back on it.
 
@@ -482,16 +481,16 @@ allowed_edges:
     kind: consumes
     required: false
     optional: true
-  - to: rvnd                         # OPTIONAL — enforcement + chain, behind the adapter
+  - to: external-enforcer            # OPTIONAL — enforcement + chain, behind an adapter
     kind: consumes
     required: false
     optional: true
 ```
 
 - **Gate passes.** There is **no required cross-plane edge**. Both cross-plane
-  edges (`→ loomground`, `→ rvnd`) are `required: false` and isolated behind
+  edges (`→ loomground`, `→ external-enforcer`) are `required: false` and isolated behind
   flag-gated adapters, so a topology check that verifies "the default build has
-  no `loomground_*` / `rvnd.*` import outside its adapter module" passes even in
+  no enrichment-provider import outside its adapter module" passes even in
   a checkout with neither present. The `→ ctrl` edge is intra-plane (the A2A
   channel + roster are ctrl's own), not a cross-plane dependency. No edge points
   back up; no cycle.
@@ -511,14 +510,14 @@ allowed_edges:
      within-harness path).
    - ctrl-desk `steer`/`hold` → A2A `issue-directive`/`hold` (§8).
    - Advisory (role) criteria only. Fully functional with neither loomground nor
-     RVND.
+     external enforcement.
 2. **Phase 2 — loomground value grounding (optional).** Land the per-plane seam
    (§4): flag-gated, universal consumption of any subset of the six REAL-CONSUME
    planes; `grounding` envelope populated when a plane is present; advisory
    fallback per dimension when absent. Purely additive.
-3. **Phase 3 — RVND enforcement (optional).** Land the §6 adapter: directive
+3. **Phase 3 — external enforcement (optional).** Land the §6 adapter: directive
    permit/hold/deny + chained receipt + witnessed plane; advisory-vs-enforce
-   split. Purely additive; Phase-1/2 behaviour unchanged when RVND is absent.
+   split. Purely additive; Phase-1/2 behaviour unchanged when external enforcement is absent.
 4. **Phase 4 (reserved, not this SPEC) — neutralize + publish.** Split into a
    neutral `spec/` core + `bindings/` appendix (§10). Publication is a reserved
    act for the owner.
