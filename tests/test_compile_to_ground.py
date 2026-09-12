@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 PROBE = Path(__file__).resolve().parent / "_ground_probe.py"
-PROJECTS = Path(__file__).resolve().parents[2]
+PROJECTS = next((p for p in Path(__file__).resolve().parents if (p / "loomground-repos").is_dir()), Path(__file__).resolve().parents[2])
 POLICY_COMPILER = PROJECTS / "policy-compiler" / "policy_compiler" / "__init__.py"
 
 pytestmark = pytest.mark.skipif(
