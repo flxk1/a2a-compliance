@@ -8,6 +8,7 @@ escalation ceiling -> route-human, gamed proxy -> hold, weak evidence -> route-h
 clean -> no-steer. A partial case (natural env, some planes absent) proves per-dimension
 degradation with honest provenance."""
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -158,6 +159,9 @@ def test_all_six_planes_grounded_with_honest_provenance(tmp_path):
     assert out["any_grounded"] is True
 
 
+@pytest.mark.skipif(importlib.util.find_spec("deontic") is None,
+                    reason="this case reads an INSTALLED deontic plane (CI installs it); "
+                           "`add_src` is what a bare checkout uses")
 def test_partial_grounding_degrades_absent_planes(tmp_path):
     # Natural env: deontic/norm/proxy installed; mandate/escalation/falsifiability not.
     # A prohibition collision still drives a real hold off the present deontic plane,
