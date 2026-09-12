@@ -1,6 +1,6 @@
 # a2a-compliance
 
-> Compliance agents steer maker agents over an agent-to-agent control channel, keeping them aligned to the operator's values.
+> Control maker agents over an A2A protocol with role authority and optional Loomground value grounding.
 
 ## Problem
 Multi-agent runs have makers and overseers. Steering a maker needs a channel, a resolved authority, and the boundary that maker itself declares.

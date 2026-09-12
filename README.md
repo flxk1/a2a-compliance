@@ -4,7 +4,7 @@
 
 **May a compliance agent direct this maker into that action?**
 
-Compliance agents steer maker agents over an agent-to-agent control channel, keeping them aligned to the operator's values.
+Control maker agents over an A2A protocol with role authority and optional Loomground value grounding.
 
 ## Problem
 
