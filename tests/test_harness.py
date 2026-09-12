@@ -22,6 +22,7 @@ from a2a_compliance.harness import (
     HarnessTransport,
     SubprocessSpawner,
     ClaudeHarnessSpawner,
+    ClaudeHarnessMakerHandle,
     MakerSpec,
     DirectiveTransport,
 )
@@ -194,7 +195,7 @@ def test_deliver_to_non_owned_uses_inbox(transport, tmp_path):
     assert resp and resp[0].verb is Verb.REPORT_STATE
 
 
-# --- Claude-Code binding is a seam, not a working driver -------------------
+# --- Claude-Code binding: real driver over injected host callables ---------
 
 def test_claude_spawner_is_an_unwired_seam():
     spawner = ClaudeHarnessSpawner()  # no injected host callables
@@ -202,17 +203,62 @@ def test_claude_spawner_is_an_unwired_seam():
         spawner.spawn(MakerSpec(session_id="x", argv=[], inbox_root="/tmp"))
 
 
-def test_claude_spawner_uses_injected_spawn_fn():
-    calls = {}
+def test_claude_spawn_returns_handle_bound_to_host_callables(tmp_path):
+    calls = {"deliver": [], "stopped": []}
+    spawner = ClaudeHarnessSpawner(
+        spawn_fn=lambda spec: f"agent::{spec.session_id}",
+        stop_fn=lambda aid: calls["stopped"].append(aid) or True,
+        deliver_fn=lambda aid, msg: calls["deliver"].append((aid, msg.verb)),
+        alive_fn=lambda aid: aid not in calls["stopped"],
+    )
+    handle = spawner.spawn(MakerSpec(session_id="m", argv=[], inbox_root=str(tmp_path)))
+    assert isinstance(handle, ClaudeHarnessMakerHandle)
+    assert handle.is_alive() is True
 
-    def fake_spawn(spec):
-        calls["spec"] = spec
-        return "handle-sentinel"
+    # deliver routes through deliver_fn (e.g. SendMessage), not the file inbox
+    handle.deliver(_query("comp-1", "m", ["mandate"]))
+    assert calls["deliver"] == [("agent::m", Verb.QUERY_STATE)]
 
-    spawner = ClaudeHarnessSpawner(spawn_fn=fake_spawn)
-    out = spawner.spawn(MakerSpec(session_id="x", argv=[], inbox_root="/tmp"))
-    assert out == "handle-sentinel"
-    assert calls["spec"].session_id == "x"
+    # stop routes through stop_fn (e.g. TaskStop): a REAL, enforceable stop
+    assert handle.enforceable is True
+    assert handle.stop() is True
+    assert calls["stopped"] == ["agent::m"]
+    assert handle.is_alive() is False
+
+
+def test_claude_stop_without_stop_fn_is_not_enforceable(tmp_path):
+    # spawn_fn wired but no stop_fn: never claim a stop the host cannot make
+    spawner = ClaudeHarnessSpawner(spawn_fn=lambda spec: "aid")
+    handle = spawner.spawn(MakerSpec(session_id="m", argv=[], inbox_root=str(tmp_path)))
+    assert handle.enforceable is False
+    assert handle.stop() is False
+
+
+def test_claude_deliver_without_deliver_fn_degrades_to_inbox(tmp_path):
+    # no deliver_fn: deliver falls back to the cooperative file inbox, no silent drop
+    spawner = ClaudeHarnessSpawner(spawn_fn=lambda spec: "aid")
+    handle = spawner.spawn(MakerSpec(session_id="m", argv=[], inbox_root=str(tmp_path)))
+    handle.deliver(_query("comp-1", "m", ["mandate"]))
+    assert FileInbox(tmp_path).poll("m"), "directive should land in the file inbox"
+
+
+def test_transport_stop_reports_host_stop_for_claude_owned(tmp_path):
+    stopped = []
+    spawner = ClaudeHarnessSpawner(
+        spawn_fn=lambda spec: f"agent::{spec.session_id}",
+        stop_fn=lambda aid: stopped.append(aid) or True,
+        alive_fn=lambda aid: aid not in stopped,
+    )
+    t = HarnessTransport(
+        inbox_root=tmp_path / "a2a", spawner=spawner, compliance_actor="comp-1",
+    )
+    t.spawn(MakerSpec(session_id="m", argv=[], inbox_root=str(tmp_path / "a2a")))
+    assert t.owns("m") is True
+    result = t.stop("m")
+    assert result.enforceable is True
+    assert result.mechanism == "host-stop"
+    assert result.terminated is True
+    assert t.owns("m") is False
 
 
 # --- guard: the harness is NOT on the default import path ------------------
