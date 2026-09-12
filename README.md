@@ -58,6 +58,11 @@ out: edit   decision=steer        dispatched=True  verb=issue-directive
 - roles: eight packaged contracts in `a2a_compliance/roles/*.json`, validated by
   `schema/compliance-role.schema.json`; each fixes identity, inputs, outputs,
   allowed consumed capabilities, prohibited effects and hand-offs.
+- lifecycle: `enforce_preview(ControlPlan, [StageReceipt]) → EnforcementPreview`
+  and `reconcile(ControlPlan, EnforcementPreview, ControlReceipt,
+  [StageReceipt]) → Reconciliation`. Receipts are role-checked and bound to the
+  proposed action digest. Preview and reconciliation never dispatch or perform
+  the underlying checks ([docs/lifecycle.md](docs/lifecycle.md)).
 - wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`; `Verb`, `Message`, `Grounding`, `Enforcement` re-exported from `interfaces.a2a_control`
 
 ## Profiles
@@ -73,7 +78,7 @@ send, mutate, erase, certify or dispatch anything.
 
 ## Status
 
-0.1.0 · 60 tests · Python >=3.10 · zero runtime dependencies · external enforcement is design only
+0.1.0 · 74 tests · Python >=3.10 · zero runtime dependencies · enforcement preview only
 
 ## License
 

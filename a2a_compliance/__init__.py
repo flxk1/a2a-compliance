@@ -69,6 +69,18 @@ from .team import (
     ControlPlan,
     ComplianceTeam,
 )
+from .lifecycle import (
+    ReceiptStatus,
+    RunState,
+    PREFLIGHT_TOOLS,
+    POSTFLIGHT_TOOLS,
+    StageReceipt,
+    EnforcementPreview,
+    ControlReceipt,
+    Reconciliation,
+    enforce_preview,
+    reconcile,
+)
 
 __all__ = [
     "Verb",
@@ -121,4 +133,14 @@ __all__ = [
     "RoleStep",
     "ControlPlan",
     "ComplianceTeam",
+    "ReceiptStatus",
+    "RunState",
+    "PREFLIGHT_TOOLS",
+    "POSTFLIGHT_TOOLS",
+    "StageReceipt",
+    "EnforcementPreview",
+    "ControlReceipt",
+    "Reconciliation",
+    "enforce_preview",
+    "reconcile",
 ]

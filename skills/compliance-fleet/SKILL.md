@@ -11,7 +11,7 @@ description: >-
   dimension when that plane is absent. External enforcement is an optional adapter that adds a verdict and a signed
   chain to a directive. Triggers on "control my agents", "keep the makers aligned", "steer/hold/halt this
   maker", "watch the fleet for value drift", "issue a compliance directive".
-allowed-tools: a2a_plan a2a_ground
+allowed-tools: a2a_plan a2a_admission_preview a2a_reconcile a2a_ground
 governance:
   grade: L1
   actions:
@@ -51,6 +51,12 @@ the bounded grounding result over the MCP server's published capability surface.
 Use `a2a_ground` for the narrower six-plane derivation. Message
 dispatch remains a host act: the skill must surface reserved directives instead
 of sending them through an undeclared channel.
+
+Before any host dispatch, call `a2a_admission_preview` with the role-owned,
+action-digest-bound stage receipts. Only `admitted` may be handed to a host;
+the tool itself never dispatches. After the host returns a `ControlReceipt`,
+call `a2a_reconcile` with postflight receipts. Never render `RECONCILED` as
+`CERTIFIED` unless the returned `certified` field is true.
 
 For a full-family run, build `ControlRequest(profile=TeamProfile.LOOMGROUND)`, supply the
 host's actual `CapabilityInventory`, and call `ComplianceTeam.plan` before
