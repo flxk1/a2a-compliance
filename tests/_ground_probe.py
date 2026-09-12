@@ -9,8 +9,10 @@ one place loomground is actually imported and consumed.
 Usage: ``python _ground_probe.py <spec.json>`` -> prints one JSON result line.
 
 Spec keys (all optional):
-  add_src        bool  — add the on-disk src of the not-installed planes to sys.path,
-                         so ALL SIX planes are importable (full real-consume demo).
+  add_src        bool  — add the on-disk src of every value plane (and the deps they
+                         import) to sys.path, so all six are importable from src
+                         without relying on any being pip-installed (full real-consume
+                         demo); planes with no on-disk src are left to the packaged copy.
   disable        str   — value for A2A_DISABLE_PLANES ("all" or a comma list).
   compile_policy str   — compile this prose via policy-compiler; use its
                          to_grounding_seam() as the policy (the compile->ground chain).
@@ -35,9 +37,14 @@ def main() -> None:
     # Make the a2a-compliance repo importable.
     sys.path.insert(0, str(REPO))
 
-    # Optionally make the not-installed planes importable from their on-disk src.
+    # Optionally make every value plane grounding reads importable from its on-disk
+    # src (plus the deps those planes import), so the probe is self-contained from a
+    # bare checkout — not only where the packaged planes happen to be pip-installed.
+    # Absent src (e.g. in CI, which pip-installs all but the three src-contract
+    # planes) is skipped, so the packaged copy is used there.
     if spec.get("add_src"):
-        for plane in ("mandate", "escalation", "falsifiability"):
+        for plane in ("mandate", "escalation", "falsifiability",
+                      "deontic", "norm", "proxy", "governance", "solver"):
             src = PROJECTS / "loomground-repos" / f"loomground-{plane}" / "src"
             if src.is_dir():
                 sys.path.insert(0, str(src))
