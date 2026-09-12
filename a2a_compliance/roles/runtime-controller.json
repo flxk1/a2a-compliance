@@ -1,0 +1,11 @@
+{
+  "id": "runtime-controller",
+  "identity": "a2a-compliance/runtime-controller",
+  "purpose": "Preview admission, containment, drift and privacy controls.",
+  "inputs": ["bounded_recommendation", "runtime_state"],
+  "outputs": ["enforcement_preview"],
+  "allowed_capabilities": ["tool:lane_evaluate", "tool:lock_text", "tool:drift_breaker", "tool:erasure_sweep", "tool:privacy_scan", "skill:privacy-shield"],
+  "prohibited_effects": ["host_dispatch", "erasure_execution", "secret_egress"],
+  "handoff_to": ["assurance-recorder"],
+  "may_dispatch": false
+}

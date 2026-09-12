@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flxk1/a2a-compliance/schema/compliance-role.schema.json",
+  "title": "A2A Compliance Role Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "identity", "purpose", "inputs", "outputs", "allowed_capabilities", "prohibited_effects", "handoff_to", "may_dispatch"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"},
+    "identity": {"type": "string", "pattern": "^a2a-compliance/[a-z][a-z0-9-]+$"},
+    "purpose": {"type": "string", "minLength": 1},
+    "inputs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "outputs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "allowed_capabilities": {"type": "array", "items": {"type": "string", "pattern": "^(tool|skill|contract|distribution):"}, "minItems": 1, "uniqueItems": true},
+    "prohibited_effects": {"type": "array", "items": {"type": "string"}, "contains": {"const": "host_dispatch"}, "uniqueItems": true},
+    "handoff_to": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "may_dispatch": {"const": false}
+  }
+}

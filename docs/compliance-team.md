@@ -21,6 +21,11 @@ The eight roles are:
 8. `assurance-recorder` — certification, 5d-nd, oversight, posture, effects,
    freshness, obligation discharge, audit chain and evidence package.
 
+Their installable contracts live in `a2a_compliance/roles/*.json` and validate
+against `schema/compliance-role.schema.json`. `role_manifests()` loads them from
+an installed wheel. Every manifest sets `may_dispatch: false`; role output is a
+receipt or preview for the next hand-off, never a host effect.
+
 Together with `a2a-compliance` itself, the manifest assigns all 41 public family
 repositories exactly once. Repository ownership and capability invocation are
 separate: a repository can contribute a callable tool, an installable skill, a

@@ -1,0 +1,11 @@
+{
+  "id": "decision-verifier",
+  "identity": "a2a-compliance/decision-verifier",
+  "purpose": "Evaluate the patch and independently verify the bounded verdict.",
+  "inputs": ["governance_patch", "transport", "typed_language_facets"],
+  "outputs": ["solver_verdict", "verification_trace"],
+  "allowed_capabilities": ["tool:solver_evaluate", "tool:solver_verify", "skill:analyse-risks"],
+  "prohibited_effects": ["host_dispatch", "open_as_satisfied", "trace_suppression"],
+  "handoff_to": ["oversight-assessor"],
+  "may_dispatch": false
+}

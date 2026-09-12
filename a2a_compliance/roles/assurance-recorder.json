@@ -1,0 +1,11 @@
+{
+  "id": "assurance-recorder",
+  "identity": "a2a-compliance/assurance-recorder",
+  "purpose": "Verify the decision record and reconcile duties and effects.",
+  "inputs": ["control_receipt", "observed_effects", "role_receipts"],
+  "outputs": ["reconciliation", "evidence_package"],
+  "allowed_capabilities": ["tool:govcert_verify", "tool:nd_digest", "tool:oversight_issue", "tool:oversight_verify", "tool:enforcement_compare", "tool:effect_reconcile", "tool:norm_freshness", "tool:obligation_admit", "tool:audit_chain_verify", "tool:evidence_emit", "tool:evidence_verify", "skill:evidence-emitter"],
+  "prohibited_effects": ["host_dispatch", "production_key_generation", "receipt_fabrication"],
+  "handoff_to": ["conductor"],
+  "may_dispatch": false
+}

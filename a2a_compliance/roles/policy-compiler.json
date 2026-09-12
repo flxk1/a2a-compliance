@@ -1,0 +1,11 @@
+{
+  "id": "policy-compiler",
+  "identity": "a2a-compliance/policy-compiler",
+  "purpose": "Compile written policy and reject unresolved conflicts.",
+  "inputs": ["policy_text", "span_grounded_claims"],
+  "outputs": ["compiled_policy", "policy_check_report"],
+  "allowed_capabilities": ["tool:policy_compile", "tool:policy_check", "skill:policy-compiler"],
+  "prohibited_effects": ["host_dispatch", "policy_activation", "residual_span_suppression"],
+  "handoff_to": ["language-panel"],
+  "may_dispatch": false
+}

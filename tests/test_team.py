@@ -1,3 +1,8 @@
+import json
+from pathlib import Path
+
+import jsonschema
+
 from a2a_compliance import (
     ACTION_NO_STEER,
     CapabilityInventory,
@@ -9,6 +14,7 @@ from a2a_compliance import (
     LOOMGROUND_REPOSITORIES,
     TEAM_ROLES,
     TeamProfile,
+    role_manifests,
 )
 
 
@@ -46,6 +52,30 @@ def test_manifest_assigns_all_41_public_repositories_once():
     assert len(LOOMGROUND_REPOSITORIES) == 41
     assert len(assigned) == 41
     assert len(set(assigned)) == 41
+
+
+def test_packaged_role_contracts_match_code_manifest_exactly():
+    manifests = {manifest.id: manifest for manifest in role_manifests()}
+    roles = {role.id: role for role in TEAM_ROLES}
+    assert len(manifests) == len(roles) == 8
+    assert manifests.keys() == roles.keys()
+    for role_id, role in roles.items():
+        manifest = manifests[role_id]
+        assert manifest.identity == f"a2a-compliance/{role_id}"
+        assert manifest.purpose == role.purpose
+        assert manifest.allowed_capabilities == tuple(c.key for c in role.capabilities)
+        assert manifest.may_dispatch is False
+        assert "host_dispatch" in manifest.prohibited_effects
+
+
+def test_role_contract_files_validate_against_published_schema():
+    root = Path(__file__).parent.parent
+    schema = json.loads((root / "schema/compliance-role.schema.json").read_text())
+    validator = jsonschema.Draft202012Validator(schema)
+    files = sorted((root / "a2a_compliance/roles").glob("*.json"))
+    assert len(files) == 8
+    for path in files:
+        validator.validate(json.loads(path.read_text()))
 
 
 def test_full_profile_routes_human_when_required_capabilities_are_missing():
@@ -98,4 +128,3 @@ def test_missing_supporting_skills_are_visible_but_do_not_block():
     assert plan.ready is True
     assert "skill:loomground" in plan.missing_supporting
     assert "skill:policy-compiler" in plan.missing_supporting
-
