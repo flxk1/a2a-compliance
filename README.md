@@ -4,9 +4,9 @@
 
 **May a compliance team allow this maker action to take effect?**
 
-Plan a governed maker action across the complete Loomground family, then control
-the maker over an A2A protocol. The package has two explicit profiles: a
-dependency-free protocol floor and a fail-closed Loomground compliance team.
+Plan a governed maker action across the Loomground family, then control
+the maker over an A2A protocol. Two profiles: a protocol floor and
+a fail-closed Loomground compliance team.
 
 ## Problem
 
@@ -25,10 +25,11 @@ Base install has zero dependencies. Extras: `.[schema]` (jsonschema>=4), `.[mani
 ```python
 from a2a_compliance import ComplianceAgent, ControlParticipant, FileInbox, GovernanceBlock, Roster
 block = GovernanceBlock.from_manifest("tests/fixtures/maker_skill.md")
-inbox = FileInbox("/tmp/a2a")
+inbox = FileInbox("a2a-inbox")
 comp = ComplianceAgent("comp-1", "policy-compliance", inbox, Roster(), {"maker-1": block})
 maker = ControlParticipant("maker-1", inbox, compliance_actor="comp-1")
-comp.issue_directive("maker-1", "keep edits in module X", "constrain", target_kind="edit")
+for kind in ("edit", "commit", "push"):
+    comp.issue_directive("maker-1", "keep edits in module X", "constrain", target_kind=kind)
 maker.checkpoint()
 ```
 
@@ -45,40 +46,23 @@ out: edit   decision=steer        dispatched=True  verb=issue-directive
 
 ## Interface
 
-- compliance side: `ComplianceAgent.query_state | issue_directive | hold | resume | halt | collect_replies | ground_and_steer` → `DispatchResult(dispatched, authorization, message, ruling, surfaced_to_human, denied_reason, grounding_result)`
-- maker side: `ControlParticipant.checkpoint() → [Message]` · `should_continue()` · `is_held()`; delivery is cooperative — a maker that never checkpoints is unsteerable ([docs/transport.md](docs/transport.md))
-- authority: `authorize(from_role, verb, maker_id, roster) → Authorization` · `Roster` · `COMPLIANCE_ROLES` · `MAKER_ROLES`; `halt` is reserved and dispatches on `confirm=True`
-- boundary: `GovernanceBlock.from_manifest(path).rule(kind) → SteerRuling(SteerDecision.STEER | ROUTE_HUMAN | REFUSE)`
-- grounding: `ground(GroundingContext) → GroundingResult` · `ALL_PLANES` · `available(plane)` · `accept_compiled_policy(payload)` ([docs/value-grounding.md](docs/value-grounding.md))
-- team: `ComplianceTeam.plan(ControlRequest) → ControlPlan` and
-  `ComplianceTeam.assess(ControlRequest, GroundingResult) → ControlPlan`. The
-  plan assigns all 41 public family repositories to eight roles and names the
-  tools, skills, contracts and distributions each role consumes. It performs no
-  dispatch or enforcement ([docs/compliance-team.md](docs/compliance-team.md)).
-- roles: eight packaged contracts in `a2a_compliance/roles/*.json`, validated by
-  `schema/compliance-role.schema.json`; each fixes identity, inputs, outputs,
-  allowed consumed capabilities, prohibited effects and hand-offs.
-- lifecycle: `enforce_preview(ControlPlan, [StageReceipt]) → EnforcementPreview`
-  and `reconcile(ControlPlan, EnforcementPreview, ControlReceipt,
-  [StageReceipt]) → Reconciliation`. Receipts are role-checked and bound to the
-  proposed action digest. Preview and reconciliation never dispatch or perform
-  the underlying checks ([docs/lifecycle.md](docs/lifecycle.md)).
-- wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`; `Verb`, `Message`, `Grounding`, `Enforcement` re-exported from `interfaces.a2a_control`
+- compliance side: `ComplianceAgent.query_state | issue_directive | hold | resume | halt | collect_replies | ground_and_steer` → `DispatchResult`
+- maker side: `ControlParticipant.checkpoint() → [Message]` · `should_continue()` · `is_held()`. Opt-in `a2a_compliance.harness.HarnessTransport` stops makers it spawned ([docs/transport.md](docs/transport.md))
+- authority: `authorize(from_role, verb, maker_id, roster) → Authorization`; `halt` is reserved and dispatches on `confirm=True`
+- boundary: `GovernanceBlock.from_manifest(path).rule(kind) → SteerRuling(STEER | ROUTE_HUMAN | REFUSE)`
+- grounding: `ground(GroundingContext) → GroundingResult` over six value planes, advisory when absent · `accept_compiled_policy(payload)` ([docs/value-grounding.md](docs/value-grounding.md))
+- team: `ComplianceTeam.plan(ControlRequest) → ControlPlan` · `assess(ControlRequest, GroundingResult)`. `TeamProfile.PROTOCOL` runs zero role steps and clears on the boundary alone; `TeamProfile.LOOMGROUND` routes to a human on at least a missing required capability, assessment, or reserved action. The plan cannot send, mutate, erase, certify or dispatch, and consumes capabilities instead of regrowing them; `ready` means ready to begin the host-orchestrated hand-offs, never ready to dispatch ([docs/compliance-team.md](docs/compliance-team.md))
+- roles: `role_manifests()` loads eight packaged `a2a_compliance/roles/*.json`; every role sets `may_dispatch: false`
+- lifecycle: `enforce_preview(plan, receipts) → EnforcementPreview` admits, holds, routes to a human, or refuses on role-owned, digest-bound receipts; `reconcile(plan, preview, control_receipt, receipts) → Reconciliation` certifies only a complete, admitted dispatch. Dispatch, enforcement, erasure and evidence writing stay host acts ([docs/lifecycle.md](docs/lifecycle.md))
+- wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`
 
-## Profiles
+## Family
 
-- `protocol`: the existing zero-dependency A2A channel and role-authority floor.
-- `loomground`: the compliance-team plan. Required family capabilities must be
-  present and a grounded assessment must exist; otherwise the plan routes to a
-  human. The module consumes published capabilities and never regrows their
-  implementation.
-
-External enforcement remains a host act. A `ControlPlan` is inert: it cannot
-send, mutate, erase, certify or dispatch anything.
+Runtime controls. `ComplianceTeam` assigns the 41 repositories to eight roles. Optional to both profiles; LOOMGROUND degrades an absent one to a human route. Consumed by [loomground-mcp](https://github.com/flxk1/loomground-mcp), serving `compliance-fleet`. Catalogue: [CATALOGUE.json](https://github.com/flxk1/loomground/blob/main/CATALOGUE.json).
 
 ## Status
 
-0.1.0 · 74 tests · Python >=3.10 · zero runtime dependencies · enforcement preview only
+0.2.0 · 74 tests · Python >=3.10 · enforcement preview only
 
 ## License
 

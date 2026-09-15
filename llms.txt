@@ -1,6 +1,6 @@
 # a2a-compliance
 
-> Plan a governed maker action across the complete Loomground family, then control the maker over an A2A protocol. The dependency-free protocol floor remains available; the full-family profile fails closed.
+> Plan a governed maker action across the Loomground family, then control the maker over an A2A protocol. Two profiles: a protocol floor and a fail-closed Loomground compliance team.
 
 ## Problem
 Multi-agent runs have makers and overseers. Steering a maker needs a channel, a resolved authority, and the boundary that maker itself declares.
@@ -16,29 +16,28 @@ Base install has zero dependencies. Extras: `.[schema]` (jsonschema>=4), `.[mani
 ```python
 from a2a_compliance import ComplianceAgent, ControlParticipant, FileInbox, GovernanceBlock, Roster
 block = GovernanceBlock.from_manifest("tests/fixtures/maker_skill.md")
-inbox = FileInbox("/tmp/a2a")
+inbox = FileInbox("a2a-inbox")
 comp = ComplianceAgent("comp-1", "policy-compliance", inbox, Roster(), {"maker-1": block})
 maker = ControlParticipant("maker-1", inbox, compliance_actor="comp-1")
-comp.issue_directive("maker-1", "keep edits in module X", "constrain", target_kind="edit")
+for kind in ("edit", "commit", "push"):
+    comp.issue_directive("maker-1", "keep edits in module X", "constrain", target_kind=kind)
 maker.checkpoint()
 ```
 
 ## Interface
-- compliance side: `ComplianceAgent.query_state | issue_directive | hold | resume | halt | collect_replies | ground_and_steer` → `DispatchResult(dispatched, authorization, message, ruling, surfaced_to_human, denied_reason, grounding_result)`
-- maker side: `ControlParticipant.checkpoint() → [Message]` · `should_continue()` · `is_held()`; delivery is cooperative — a maker that never checkpoints is unsteerable ([docs/transport.md](docs/transport.md))
-- authority: `authorize(from_role, verb, maker_id, roster) → Authorization` · `Roster` · `COMPLIANCE_ROLES` · `MAKER_ROLES`; `halt` is reserved and dispatches on `confirm=True`
-- boundary: `GovernanceBlock.from_manifest(path).rule(kind) → SteerRuling(SteerDecision.STEER | ROUTE_HUMAN | REFUSE)`
-- grounding: `ground(GroundingContext) → GroundingResult` · `ALL_PLANES` · `available(plane)` · `accept_compiled_policy(payload)` ([docs/value-grounding.md](docs/value-grounding.md))
-- team: `ComplianceTeam.plan(ControlRequest) → ControlPlan` · `ComplianceTeam.assess(ControlRequest, GroundingResult) → ControlPlan`. Eight roles assign all 41 public family repositories exactly once and consume their published tools, skills, contracts, or distribution surfaces. `ready` means ready to begin those host-orchestrated hand-offs, never ready to dispatch. ([docs/compliance-team.md](docs/compliance-team.md))
-- role contracts: `role_manifests()` loads eight packaged `a2a_compliance/roles/*.json` manifests; `schema/compliance-role.schema.json` validates identity, inputs, outputs, allowed capabilities, prohibited effects and hand-offs. Every role sets `may_dispatch: false`.
-- lifecycle: `enforce_preview(plan, receipts)` requires digest-bound receipts from the owning roles and returns only `admitted`, `hold`, `route-human`, or `refuse`; `reconcile(plan, preview, control_receipt, receipts)` consumes postflight receipts and cannot certify a dispatch without a matching prior admission. Neither function calls a tool or performs an effect. ([docs/lifecycle.md](docs/lifecycle.md))
-- wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`; `Verb`, `Message`, `Grounding`, `Enforcement` re-exported from `interfaces.a2a_control`
+- compliance side: `ComplianceAgent.query_state | issue_directive | hold | resume | halt | collect_replies | ground_and_steer` → `DispatchResult`
+- maker side: `ControlParticipant.checkpoint() → [Message]` · `should_continue()` · `is_held()`. Opt-in `a2a_compliance.harness.HarnessTransport` stops makers it spawned ([docs/transport.md](docs/transport.md))
+- authority: `authorize(from_role, verb, maker_id, roster) → Authorization`; `halt` is reserved and dispatches on `confirm=True`
+- boundary: `GovernanceBlock.from_manifest(path).rule(kind) → SteerRuling(STEER | ROUTE_HUMAN | REFUSE)`
+- grounding: `ground(GroundingContext) → GroundingResult` over six value planes, advisory when absent · `accept_compiled_policy(payload)` ([docs/value-grounding.md](docs/value-grounding.md))
+- team: `ComplianceTeam.plan(ControlRequest) → ControlPlan` · `assess(ControlRequest, GroundingResult)`. `TeamProfile.PROTOCOL` runs zero role steps and clears on the boundary alone; `TeamProfile.LOOMGROUND` routes to a human on at least a missing required capability, assessment, or reserved action. The plan cannot send, mutate, erase, certify or dispatch, and consumes capabilities instead of regrowing them; `ready` means ready to begin the host-orchestrated hand-offs, never ready to dispatch ([docs/compliance-team.md](docs/compliance-team.md))
+- roles: `role_manifests()` loads eight packaged `a2a_compliance/roles/*.json`; every role sets `may_dispatch: false`
+- lifecycle: `enforce_preview(plan, receipts) → EnforcementPreview` admits, holds, routes to a human, or refuses on role-owned, digest-bound receipts; `reconcile(plan, preview, control_receipt, receipts) → Reconciliation` certifies only a complete, admitted dispatch. Dispatch, enforcement, erasure and evidence writing stay host acts ([docs/lifecycle.md](docs/lifecycle.md))
+- wire: `envelope.to_wire` / `envelope.from_wire` against `schema/a2a-control-message.schema.json`
 
-## Profiles
-- `protocol`: zero-dependency A2A channel and role authority; absent value planes remain honestly advisory.
-- `loomground`: inert compliance-team plan in the order `evidence → policy/languages → solver → oversight → A2A decision → runtime controls → host dispatch → assurance/reconciliation`. Missing required capability, missing assessment, `OPEN`, or a reserved act routes to the human. The team consumes existing family implementations; it does not reproduce them.
-
-Tool execution, human approval, dispatch, enforcement, erasure, certification and evidence writing remain host acts.
+## Family
+Runtime controls. `ComplianceTeam` assigns the 41 repositories to eight roles. Optional to both profiles; LOOMGROUND degrades an absent one to a human route. Consumed by [loomground-mcp](https://github.com/flxk1/loomground-mcp), serving `compliance-fleet`. Catalogue: [CATALOGUE.json](https://github.com/flxk1/loomground/blob/main/CATALOGUE.json).
 
 Language: loomground — guide https://github.com/flxk1/loomground/blob/main/llms.txt (the .lg language an agent reads, emits, validates); catalogue https://github.com/flxk1/loomground/blob/main/CATALOGUE.json
-Skills: compliance-fleet (`a2a_plan`, `a2a_ground`)
+Skills: compliance-fleet
+MCP tools: a2a_admission_preview, a2a_ground, a2a_plan, a2a_reconcile
