@@ -4,11 +4,11 @@ description: >-
   A compliance team plans a maker action across Loomground, then compliance agents steer maker agents over an agent-to-agent control channel, keeping them aligned to the
   operator's values: query a maker's state, issue a directive, hold, resume or halt; receive report-state,
   ack and escalate back. Authority is role-based, and a directive stays within the boundary that maker
-  declares in its own governance block. Works in bare mode with zero Loomground and zero external enforcement, where the
+  declares in its own governance block. In bare mode (zero Loomground, zero external enforcement) the
   steering criterion is the compliance role's advisory judgement. The full Loomground profile consumes the
-  published orchestration, tools, skills and contracts as a fail-closed pipeline; where
-  a value plane is present the criterion is drawn from the grounded value graph, degrading to advisory per
-  dimension when that plane is absent. External enforcement is an optional adapter that adds a verdict and a signed
+  published tools, skills and contracts as a fail-closed pipeline; a present value plane draws the
+  criterion from the grounded value graph, an absent one degrades that dimension to advisory.
+  External enforcement is an optional adapter adding a verdict and a signed
   chain to a directive. Triggers on "control my agents", "keep the makers aligned", "steer/hold/halt this
   maker", "watch the fleet for value drift", "issue a compliance directive".
 allowed-tools: a2a_plan a2a_admission_preview a2a_reconcile a2a_ground
