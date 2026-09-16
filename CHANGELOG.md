@@ -2,6 +2,52 @@
 <!-- Copyright 2026 flxk1 -->
 # Changelog
 
+## Unreleased
+
+### Added
+
+Admission and permit issuance. `wire.admission.admit` returns ADMITTED,
+REVIEW_REQUIRED or REFUSED over stage receipts it verifies first: a prohibited
+or undeclared action is refused, a reserved action is admitted only with a
+human-approval receipt that verifies, is bound to the same action digest and is
+authorised for that kind, and a plan that is only `ready` never admits.
+`wire.admission.issue_permit` returns a signed, single-use `ExecutionPermit`
+only for an ADMITTED action, and its nonce is spent once.
+
+Mediated execution. `wire.executor.consume_and_execute` runs a governed effect
+only against a valid `ExecutionPermit`: it verifies the permit, checks the tool
+and arguments match what the permit bound, atomically spends the permit's nonce,
+then executes through a host-supplied executor and records a signed
+`ToolReceipt`. A missing or tampered permit, a replayed nonce, a permit expired
+or revoked since admission, or mutated arguments each produce no effect. A
+subprocess conformance adapter ships as an example, outside the installed
+package.
+
+Postflight assurance. `wire.reconciliation.reconcile` verifies the permit and
+every tool receipt, then compares their effects against a host-supplied,
+independently observed set; a missing, unexpected or mismatched effect is a
+residual and the signed `Reconciliation` is not clean. `wire.certification.certify`
+issues a signed `OversightCertificate` only when the permit verifies at an
+enforcement grade, the tool receipts verify and bind the action, the
+reconciliation is clean, every blocking obligation carries a verified
+`ObligationDischargeReceipt` (a bare string is no longer evidence of discharge),
+every mandatory source is fresh, and the certifying identity differs from the
+permit issuer, the reconciler, the tool executors and the approver; a successful
+tool receipt alone never certifies. `wire.audit_chain.audit_chain_verify` detects
+removal, reorder or mutation of any object in a run's assurance chain. Two
+additive wire schemas, `ObligationDischargeReceipt` and `OversightCertificate`,
+are added; no existing schema changed, and an envelope naming an unknown type is
+refused.
+
+Conformance kit and enforcement-grade profile. `wire.conformance_kit.run_conformance`
+drives the whole pipeline -- plan, admit, permit, execute, reconcile, certify --
+through host-supplied ports and reports, as end-to-end checks, that a valid run
+certifies and that each enforcement guarantee fails closed. The profile reports
+a deployment's grade as `advisory`, `mediated` or `platform`: `mediated`
+requires both the observed bypass-rejection and the host's attestation that the
+tool has no path around the proxy, since the kit cannot observe that structural
+fact itself.
+
 ## 0.4.0
 
 Signed receipt chain. Receipts are signed with Ed25519 over the same canonical
@@ -16,33 +62,6 @@ common envelope, so its absence states that a receipt is the first in a chain
 rather than that the concept does not apply.
 
 ### Fixed
-
-Postflight assurance (E4). `wire.reconciliation.reconcile` VERIFIES an
-`ExecutionPermit` and every `ToolReceipt` (E1) before comparing their
-self-reported effects against a host-supplied, independently observed
-`ObservedEffects` -- any missing, unexpected or mismatched effect is a
-residual, signed into a `Reconciliation` record as `certified=False`; it
-never retroactively admits an unverified or non-enforcement-grade permit.
-`wire.certification.certify` issues a new signed `OversightCertificate`
-ONLY when the permit verifies at an enforcement grade, every tool receipt
-verifies and binds it, the reconciliation is itself clean, every blocking
-obligation has a verified `ObligationDischargeReceipt` (new, via
-`wire.obligations.issue_discharge_receipt` -- fixes E2's caller-asserted
-`acknowledged_obligations` caveat: a bare string is no longer evidence),
-every mandatory source is fresh per an injected freshness port, and the
-certifying identity is distinct from the permit issuer, the reconciler (the
-`Reconciliation`'s own signer -- `certify` trusts its signed `certified`
-flag rather than re-deriving it, so this is the most load-bearing of the
-separations), every tool executor/recorder and the approver. A successful
-`ToolReceipt` alone can never certify. `wire.audit_chain.audit_chain_verify` checks one run's full
-assurance chain -- `StageReceipt`/`ToolReceipt` `prev_digest` sub-chains
-plus the certificate's `permit_digest`/`reconciliation_digest`/
-`tool_receipt_digests` content-addressed references -- detecting removal,
-reorder or mutation of any object in it. Two new wire schemas,
-`ObligationDischargeReceipt` and `OversightCertificate`, are additive only
-(registered in a new `schema_registry.E4_WIRE_TYPES`, kept out of the
-original eight-type `WIRE_TYPES` so that invariant stays exact); no
-existing schema's shape changed.
 
 Fixed: `from a2a_compliance.wire import verify` returned the `verify`
 submodule object (non-callable) instead of the `verify` function when a
