@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from a2a_compliance import (
     TeamProfile,
     role_manifests,
 )
+from a2a_compliance.wire import canonical
 
 
 def _request(*, profile=TeamProfile.LOOMGROUND, target="edit"):
@@ -115,6 +117,61 @@ def test_protocol_profile_keeps_dependency_free_advisory_floor():
     assert plan.disposition == "advisory"
     assert plan.steps == ()
     assert plan.missing_required == ()
+
+
+def _action_subject(request: ControlRequest) -> dict:
+    # exact shape team.py's ComplianceTeam.plan() builds before digesting
+    return {
+        "maker_id": request.context.maker_id,
+        "target_kind": request.target_kind,
+        "proposed_action": request.context.proposed_action,
+    }
+
+
+def test_action_digest_routes_through_the_one_canonical_digest_implementation():
+    cases = [
+        _request(),
+        _request(target="commit"),
+        ControlRequest(
+            context=GroundingContext(
+                maker_id="maker-2",
+                proposed_action={"bearer": "maker-2", "action": "deploy", "count": 3},
+            ),
+            target_kind="deploy",
+            governance=GovernanceBlock.from_dict({"actions": [{"kind": "deploy"}]}),
+            profile=TeamProfile.PROTOCOL,
+        ),
+    ]
+    for request in cases:
+        plan = ComplianceTeam().plan(request)
+        assert plan.action_digest == canonical.digest_hex(_action_subject(request))
+
+
+def test_action_digest_locks_in_canonical_on_a_number_that_diverged_under_json_dumps():
+    # 1e20: JCS expands it to the fixed-point digit string "100000000000000000000";
+    # the old team.py method (json.dumps(sort_keys=True)) kept "1e+20". Different
+    # bytes, different sha256 -- this is the case the two implementations
+    # disagreed on. Routing through canonical.digest_hex must produce the JCS
+    # result, not the old json.dumps one.
+    request = ControlRequest(
+        context=GroundingContext(
+            maker_id="maker-3",
+            proposed_action={"bearer": "maker-3", "action": "transfer", "amount": 1e20},
+        ),
+        target_kind="transfer",
+        governance=GovernanceBlock.from_dict({"actions": [{"kind": "transfer"}]}),
+        profile=TeamProfile.PROTOCOL,
+    )
+    subject = _action_subject(request)
+    plan = ComplianceTeam().plan(request)
+
+    old_method_digest = hashlib.sha256(json.dumps(
+        subject, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+
+    assert plan.action_digest == canonical.digest_hex(subject)
+    assert plan.action_digest != old_method_digest  # proves this case would have diverged
 
 
 def test_missing_supporting_skills_are_visible_but_do_not_block():
