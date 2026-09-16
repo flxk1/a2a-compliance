@@ -1,7 +1,8 @@
 """Enforcement wire contracts: JSON Schemas, RFC 8785 canonical digest, a
-pure fail-closed verifier (E0), and DSSE/Ed25519 signature verification,
-trust-role bindings, revocation and receipt-chain linkage (E1). No host
-effect at any point.
+pure fail-closed verifier (E0), DSSE/Ed25519 signature verification,
+trust-role bindings, revocation and receipt-chain linkage (E1), and a
+verified admission decision plus permit issuance (E2, `admission.py`). No
+host effect at any point.
 
 `canonical` is stdlib-only and imported eagerly, so `a2a_compliance.wire.canonical`
 (and anything that only needs it, e.g. `team.py`'s action_digest) is importable
@@ -43,6 +44,15 @@ __all__ = [
     "DSSE_PAYLOAD_TYPE",
     "generate_dev_keypair",
     "dev_sign_subject",
+    "AdmissionDecision",
+    "AdmissionResult",
+    "admit",
+    "ApproverAuthority",
+    "InMemoryApproverAuthority",
+    "Issuer",
+    "dev_issuer",
+    "PermitIssueResult",
+    "issue_permit",
 ]
 
 _LAZY = {
@@ -63,6 +73,15 @@ _LAZY = {
     "DSSE_PAYLOAD_TYPE": ("signing", "DSSE_PAYLOAD_TYPE"),
     "generate_dev_keypair": ("signing", "generate_dev_keypair"),
     "dev_sign_subject": ("signing", "dev_sign_subject"),
+    "AdmissionDecision": ("admission", "AdmissionDecision"),
+    "AdmissionResult": ("admission", "AdmissionResult"),
+    "admit": ("admission", "admit"),
+    "ApproverAuthority": ("admission", "ApproverAuthority"),
+    "InMemoryApproverAuthority": ("admission", "InMemoryApproverAuthority"),
+    "Issuer": ("admission", "Issuer"),
+    "dev_issuer": ("admission", "dev_issuer"),
+    "PermitIssueResult": ("admission", "PermitIssueResult"),
+    "issue_permit": ("admission", "issue_permit"),
 }
 
 
