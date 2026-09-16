@@ -17,6 +17,33 @@ rather than that the concept does not apply.
 
 ### Fixed
 
+Postflight assurance (E4). `wire.reconciliation.reconcile` VERIFIES an
+`ExecutionPermit` and every `ToolReceipt` (E1) before comparing their
+self-reported effects against a host-supplied, independently observed
+`ObservedEffects` -- any missing, unexpected or mismatched effect is a
+residual, signed into a `Reconciliation` record as `certified=False`; it
+never retroactively admits an unverified or non-enforcement-grade permit.
+`wire.certification.certify` issues a new signed `OversightCertificate`
+ONLY when the permit verifies at an enforcement grade, every tool receipt
+verifies and binds it, the reconciliation is itself clean, every blocking
+obligation has a verified `ObligationDischargeReceipt` (new, via
+`wire.obligations.issue_discharge_receipt` -- fixes E2's caller-asserted
+`acknowledged_obligations` caveat: a bare string is no longer evidence),
+every mandatory source is fresh per an injected freshness port, and the
+certifying identity is distinct from the permit issuer, the reconciler (the
+`Reconciliation`'s own signer -- `certify` trusts its signed `certified`
+flag rather than re-deriving it, so this is the most load-bearing of the
+separations), every tool executor/recorder and the approver. A successful
+`ToolReceipt` alone can never certify. `wire.audit_chain.audit_chain_verify` checks one run's full
+assurance chain -- `StageReceipt`/`ToolReceipt` `prev_digest` sub-chains
+plus the certificate's `permit_digest`/`reconciliation_digest`/
+`tool_receipt_digests` content-addressed references -- detecting removal,
+reorder or mutation of any object in it. Two new wire schemas,
+`ObligationDischargeReceipt` and `OversightCertificate`, are additive only
+(registered in a new `schema_registry.E4_WIRE_TYPES`, kept out of the
+original eight-type `WIRE_TYPES` so that invariant stays exact); no
+existing schema's shape changed.
+
 Fixed: `from a2a_compliance.wire import verify` returned the `verify`
 submodule object (non-callable) instead of the `verify` function when a
 `wire` submodule had already been imported first, anywhere in the process.
