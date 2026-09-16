@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:context-manifest",
+  "title": "ContextManifest",
+  "description": "Digests of the request, policy bundle, evidence bundle, capability inventory, runtime baseline and applicable governance planes (plan: 'Wire contracts'). Net-new; produced by an adapter's prepare(ControlRequest) call (plan: 'Host adapters').",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": [
+    "request_digest", "policy_bundle_digest", "evidence_bundle_digest",
+    "capability_inventory_digest", "runtime_baseline_digest", "applicable_planes"
+  ],
+  "properties": {
+    "type": { "const": "ContextManifest" },
+    "request_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "subject_digest of the bound ControlRequest" },
+    "policy_bundle_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "evidence_bundle_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "capability_inventory_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "runtime_baseline_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "applicable_planes": {
+      "type": "array",
+      "items": { "enum": ["deontic", "norm", "mandate", "escalation", "proxy", "falsifiability"] },
+      "description": "same plane vocabulary as schema/a2a-control-message.schema.json's grounding.planes"
+    }
+  }
+}

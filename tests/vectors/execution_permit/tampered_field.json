@@ -1,0 +1,21 @@
+{
+  "action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "adapter": "subprocess",
+  "constraints": {
+    "lane": "ci",
+    "lock": [
+      "target=file-module-x"
+    ]
+  },
+  "enforcement_grade": "platform",
+  "expires_at": "2099-01-01T00:00:00+00:00",
+  "issued_at": "2026-09-16T00:00:00+00:00",
+  "issuer": "issuer:runtime-controller-1",
+  "key_id": "key-issuer-1",
+  "nonce": "nonce-0001",
+  "run_id": "run-0001",
+  "schema_version": "1.0.0",
+  "signature": "opaque-signature-not-verified-in-e0",
+  "subject_digest": "b5fa5b335c06231b641f48acc502341218848cbc2cf1d911a4eb2798966dc90b",
+  "type": "ExecutionPermit"
+}

@@ -1,0 +1,30 @@
+{
+  "actor": {
+    "id": "maker-1",
+    "role": "maker"
+  },
+  "data_classifications": [
+    "public"
+  ],
+  "declared_effects": [
+    "write"
+  ],
+  "expires_at": "2000-01-01T00:00:00+00:00",
+  "issued_at": "2026-09-16T00:00:00+00:00",
+  "issuer": "issuer:policy-author-1",
+  "key_id": "key-issuer-1",
+  "nonce": "nonce-0001",
+  "proposed_action": {
+    "action": "edit module X",
+    "bearer": "maker-1"
+  },
+  "run_id": "run-0001",
+  "schema_version": "1.0.0",
+  "signature": "opaque-signature-not-verified-in-e0",
+  "subject_digest": "f9a0bb2cc86375f3432bc353cf1e9bad0d06d6199f4f04e613579f9e42250f31",
+  "target": {
+    "id": "file-module-x",
+    "kind": "edit"
+  },
+  "type": "ControlRequest"
+}

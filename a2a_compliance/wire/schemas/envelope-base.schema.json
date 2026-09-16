@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:envelope-base",
+  "title": "Signed envelope base",
+  "description": "Fields every E0 wire object carries (plan: 'Wire contracts'). signature is opaque in E0 (E1 verifies it). subject_digest = sha256 of the RFC 8785 canonical bytes of the object with signature removed.",
+  "type": "object",
+  "required": [
+    "schema_version", "type", "issuer", "issued_at", "expires_at",
+    "run_id", "nonce", "subject_digest", "key_id", "signature"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "type": { "type": "string", "minLength": 1, "description": "wire object type name, e.g. StageReceipt" },
+    "issuer": { "type": "string", "minLength": 1, "description": "the identity that issued this object; a principal, never a platform name" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "nonce": { "type": "string", "minLength": 1, "description": "single-use per (run_id, nonce); consumed atomically by the host before dispatch (E3)" },
+    "subject_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "key_id": { "type": "string", "minLength": 1, "description": "identifies the signing key; E0 does not resolve it to a trust root" },
+    "signature": { "type": "string", "description": "opaque in E0; not verified until E1" }
+  }
+}

@@ -18,26 +18,31 @@ keywords = ["a2a", "compliance", "fleet", "orchestration", "multi-agent", "value
 # path when its package is missing, so the base install stays importable and
 # functional with neither installed (SPEC invariant 1/2 concern only
 # Loomground planes or a host adapter, which this repo never hard-depends on).
+# a2a_compliance.wire (E0) hard-imports jsonschema/referencing, but only when
+# something explicitly imports that submodule; the top-level package never
+# imports .wire, so a bare install stays importable with neither installed.
 dependencies = []
 
 [project.optional-dependencies]
 schema = [
     "jsonschema>=4",
+    "referencing>=0.30",
 ]
 manifest = [
     "PyYAML>=6",
 ]
 dev = [
     "jsonschema>=4",
+    "referencing>=0.30",
     "PyYAML>=6",
     "pytest>=7",
 ]
 
 [tool.setuptools]
-packages = ["a2a_compliance", "a2a_compliance.roles", "interfaces"]
+packages = ["a2a_compliance", "a2a_compliance.roles", "a2a_compliance.wire", "a2a_compliance.wire.schemas", "interfaces"]
 
 [tool.setuptools.package-data]
-a2a_compliance = ["roles/*.json"]
+a2a_compliance = ["roles/*.json", "wire/schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

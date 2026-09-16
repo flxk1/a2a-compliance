@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:reconciliation",
+  "title": "Reconciliation",
+  "description": "Mirrors a2a_compliance.lifecycle.Reconciliation exactly for its required core: state, certified, action_digest, missing_receipts, open_receipts, failed_receipts, invalid_receipts, reason. state reuses lifecycle.RunState's actual values (PLANNED/ASSESSED/ADMITTED/HELD/ROUTED_HUMAN/REFUSED/DISPATCHED/RECONCILED/CERTIFIED) — NOT the plan's prose state-machine names (RECEIVED/GROUNDED/EVALUATED/REVIEW_REQUIRED/OBSERVED/RESIDUAL_OPEN), which do not exist in code; see docs/enforcement/threat-model.md for this flagged discrepancy. The plan's fuller Reconciliation description (intended vs observed effects, discharged obligations, residuals) is E4 scope (effect-reconciliation, obligation-discharge repos); this schema reserves optional forward fields for it without requiring them in E0.",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": [
+    "state", "certified", "action_digest",
+    "missing_receipts", "open_receipts", "failed_receipts", "invalid_receipts", "reason"
+  ],
+  "properties": {
+    "type": { "const": "Reconciliation" },
+    "state": { "enum": ["PLANNED", "ASSESSED", "ADMITTED", "HELD", "ROUTED_HUMAN", "REFUSED", "DISPATCHED", "RECONCILED", "CERTIFIED"] },
+    "certified": { "type": "boolean" },
+    "action_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "missing_receipts": { "type": "array", "items": { "type": "string" } },
+    "open_receipts": { "type": "array", "items": { "type": "string" } },
+    "failed_receipts": { "type": "array", "items": { "type": "string" } },
+    "invalid_receipts": { "type": "array", "items": { "type": "string" } },
+    "reason": { "type": "string" },
+    "intended_effects_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "E4 forward field; not required in E0" },
+    "observed_effects_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "E4 forward field; not required in E0" },
+    "discharged_obligations": { "type": "array", "items": { "type": "string" }, "description": "E4 forward field; not required in E0" },
+    "residuals": { "type": "array", "items": { "type": "string" }, "description": "E4 forward field; not required in E0" }
+  }
+}
