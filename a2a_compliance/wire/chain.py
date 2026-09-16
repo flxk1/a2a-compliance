@@ -82,17 +82,29 @@ def verify_chain(
             errors.append(f"chain[{i}]: " + "; ".join(result.errors))
 
         claimed_prev = receipt.get("prev_digest")
-        if claimed_prev != prior_digest:
-            if i == 0:
+        if i == 0:
+            if claimed_prev != prior_digest:
                 errors.append(
                     f"chain[0]: prev_digest does not match the chain anchor "
                     f"(expected {prior_digest!r}, found {claimed_prev!r})"
                 )
-            else:
-                errors.append(
-                    f"chain[{i}]: missing or broken link (prev_digest does "
-                    "not match the immediately prior object's digest)"
-                )
+        elif claimed_prev is None:
+            # prev_digest is required on every non-genesis chain-bearing
+            # receipt; only receipts[0] (or an externally anchored genesis
+            # via `genesis_prev_digest`) may omit it.
+            errors.append(
+                f"chain[{i}]: prev_digest is required (only the chain's "
+                "genesis element may omit it)"
+            )
+        elif claimed_prev != prior_digest:
+            # Recomputed from the actual predecessor object above -- a
+            # correctly-signed receipt whose prev_digest names some OTHER
+            # (even genuinely valid) digest is rejected here just the same
+            # as a garbage one: the claimed field is never trusted alone.
+            errors.append(
+                f"chain[{i}]: missing or broken link (prev_digest does "
+                "not match the immediately prior object's digest)"
+            )
 
         try:
             prior_digest = canonical.subject_digest(receipt)
