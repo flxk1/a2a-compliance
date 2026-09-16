@@ -1,18 +1,23 @@
-"""E0 enforcement wire contracts: JSON Schemas, RFC 8785 canonical digest and a
-pure, fail-closed verifier. No signature verification (E1) and no host effect.
+"""Enforcement wire contracts: JSON Schemas, RFC 8785 canonical digest, a
+pure fail-closed verifier (E0), and DSSE/Ed25519 signature verification,
+trust-role bindings, revocation and receipt-chain linkage (E1). No host
+effect at any point.
 
 `canonical` is stdlib-only and imported eagerly, so `a2a_compliance.wire.canonical`
 (and anything that only needs it, e.g. `team.py`'s action_digest) is importable
-without `jsonschema`/`referencing` installed. `schema_registry` and `verification`
-need `jsonschema`; they are loaded lazily (PEP 562 `__getattr__`) so merely importing
-`a2a_compliance.wire` — or `a2a_compliance.team`, which imports `.wire.canonical`
-at module level — never requires them. They still import fine, and eagerly, the
-moment anything actually touches `WIRE_TYPES`/`load_schema`/`validator_for`/
-`InMemoryNonceStore`/`NonceStore`/`VerificationResult`/`verify`.
+without `jsonschema`/`referencing`/`cryptography` installed. `schema_registry` and
+`verification` need `jsonschema`; `signing` needs `cryptography` (only inside its
+functions, see that module's docstring). All are loaded lazily (PEP 562 `__getattr__`)
+so merely importing `a2a_compliance.wire` -- or `a2a_compliance.team`, which imports
+`.wire.canonical` at module level -- never requires any of them. They import fine,
+and eagerly, the moment anything actually touches one of the `_LAZY` names below;
+`verify()` itself only reaches into `signing` (and so only then requires
+`cryptography`) when a caller passes a `trust_store`.
 
-The public `verify` function is exported from the `verification` submodule
-(not `verify`, to avoid Python's import system binding `wire.__dict__["verify"]`
-to a same-named submodule as a side effect of anyone importing it directly).
+The public `verify` function is exported from the `verification` submodule (not a
+submodule named `verify`, to avoid Python's import system binding
+`wire.__dict__["verify"]` to a same-named submodule as a side effect of anyone
+importing it directly).
 """
 
 from importlib import import_module
@@ -28,6 +33,16 @@ __all__ = [
     "NonceStore",
     "VerificationResult",
     "verify",
+    "TrustBinding",
+    "TrustStore",
+    "InMemoryTrustStore",
+    "RevocationStore",
+    "InMemoryRevocationStore",
+    "ChainVerificationResult",
+    "verify_chain",
+    "DSSE_PAYLOAD_TYPE",
+    "generate_dev_keypair",
+    "dev_sign_subject",
 ]
 
 _LAZY = {
@@ -38,6 +53,16 @@ _LAZY = {
     "NonceStore": ("verification", "NonceStore"),
     "VerificationResult": ("verification", "VerificationResult"),
     "verify": ("verification", "verify"),
+    "TrustBinding": ("trust", "TrustBinding"),
+    "TrustStore": ("trust", "TrustStore"),
+    "InMemoryTrustStore": ("trust", "InMemoryTrustStore"),
+    "RevocationStore": ("trust", "RevocationStore"),
+    "InMemoryRevocationStore": ("trust", "InMemoryRevocationStore"),
+    "ChainVerificationResult": ("chain", "ChainVerificationResult"),
+    "verify_chain": ("chain", "verify_chain"),
+    "DSSE_PAYLOAD_TYPE": ("signing", "DSSE_PAYLOAD_TYPE"),
+    "generate_dev_keypair": ("signing", "generate_dev_keypair"),
+    "dev_sign_subject": ("signing", "dev_sign_subject"),
 }
 
 

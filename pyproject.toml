@@ -26,6 +26,11 @@ keywords = ["a2a", "compliance", "fleet", "orchestration", "multi-agent", "value
 # which imports team.py — stays importable with neither installed; only
 # touching wire.WIRE_TYPES/load_schema/validator_for/verify/NonceStore/
 # InMemoryNonceStore/VerificationResult actually requires them.
+# a2a_compliance.wire.signing (E1 DSSE/Ed25519) hard-imports cryptography, but
+# only function-local inside its own functions (see that module's docstring)
+# — importing the module itself, or calling wire.verify.verify() with no
+# trust_store, never requires it; only actually verifying/dev-signing a
+# signature does.
 dependencies = []
 
 [project.optional-dependencies]
@@ -36,10 +41,14 @@ schema = [
 manifest = [
     "PyYAML>=6",
 ]
+crypto = [
+    "cryptography>=41",
+]
 dev = [
     "jsonschema>=4",
     "referencing>=0.30",
     "PyYAML>=6",
+    "cryptography>=41",
     "pytest>=7",
 ]
 
