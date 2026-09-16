@@ -2,16 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:a2a-compliance:wire:stage-receipt",
   "title": "StageReceipt",
-  "description": "Mirrors a2a_compliance.lifecycle.StageReceipt exactly: role, capability, status, action_digest, input_digest, output_digest, reason. The __post_init__ invariants of that dataclass (NOT_APPLICABLE needs a reason; SATISFIED needs an output_digest) are re-expressed here as schema conditionals so a wire-level tamper cannot bypass them.",
+  "description": "Mirrors a2a_compliance.lifecycle.StageReceipt exactly: role, capability, status, action_digest, input_digest, output_digest, reason. The __post_init__ invariants of that dataclass (NOT_APPLICABLE needs a reason whose stripped form is non-empty; SATISFIED needs a truthy output_digest, i.e. non-null and non-empty) are re-expressed here as schema conditionals, matching the dataclass's own tests (`reason.strip()`, `not output_digest`) rather than mere field presence, so a wire-level tamper cannot bypass them.",
   "allOf": [
     { "$ref": "urn:a2a-compliance:wire:envelope-base" },
     {
       "if": { "properties": { "status": { "const": "NOT_APPLICABLE" } }, "required": ["status"] },
-      "then": { "required": ["reason"], "properties": { "reason": { "type": "string", "minLength": 1 } } }
+      "then": {
+        "required": ["reason"],
+        "properties": { "reason": { "type": "string", "pattern": "\\S" } }
+      }
     },
     {
       "if": { "properties": { "status": { "const": "SATISFIED" } }, "required": ["status"] },
-      "then": { "required": ["output_digest"] }
+      "then": {
+        "required": ["output_digest"],
+        "properties": { "output_digest": { "type": "string", "minLength": 1 } }
+      }
     }
   ],
   "type": "object",
