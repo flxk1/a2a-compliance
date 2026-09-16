@@ -2,7 +2,20 @@
 <!-- Copyright 2026 flxk1 -->
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+Signed receipt chain. Receipts are signed with Ed25519 over the same canonical
+bytes their digest is taken from, so a signature and a digest cannot disagree.
+A trust store binds a key to the role allowed to use it, a revocation store
+withdraws one, and `verify_chain` walks a chain of receipts: it requires each
+link to name its predecessor's `subject_digest`, recomputes that digest itself
+rather than trusting the claim, and rejects a receipt re-parented onto a
+different predecessor even when that receipt is well formed and correctly
+signed. The link field lives on the two chain-bearing receipt types, not on the
+common envelope, so its absence states that a receipt is the first in a chain
+rather than that the concept does not apply.
+
+### Fixed
 
 Fixed: `from a2a_compliance.wire import verify` returned the `verify`
 submodule object (non-callable) instead of the `verify` function when a
