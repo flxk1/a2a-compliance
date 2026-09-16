@@ -1,12 +1,15 @@
 """Enforcement wire contracts: JSON Schemas, RFC 8785 canonical digest, a
 pure fail-closed verifier (E0), DSSE/Ed25519 signature verification,
 trust-role bindings, revocation and receipt-chain linkage (E1), a verified
-admission decision plus permit issuance (E2, `admission.py`), and a mediated
+admission decision plus permit issuance (E2, `admission.py`), a mediated
 executor that consumes an admitted permit's nonce and produces a signed
-ToolReceipt (E3, `executor.py`). No host effect at any point: the real
-effect lives only behind the `ExecutorPort` a host injects into
-`consume_and_execute` -- see `examples/subprocess_adapter.py` for the
-conformance adapter, which is not part of this package.
+ToolReceipt (E3, `executor.py`), and postflight assurance -- verified
+effect reconciliation, obligation discharge and certification (E4,
+`reconciliation.py`/`obligations.py`/`certification.py`/`audit_chain.py`).
+No host
+effect at any point: the real effect lives only behind the `ExecutorPort` a
+host injects into `consume_and_execute` -- see `examples/subprocess_adapter.py`
+for the conformance adapter, which is not part of this package.
 
 `canonical` is stdlib-only and imported eagerly, so `a2a_compliance.wire.canonical`
 (and anything that only needs it, e.g. `team.py`'s action_digest) is importable
@@ -62,6 +65,15 @@ __all__ = [
     "ExecutionResult",
     "bind_constraints",
     "consume_and_execute",
+    "issue_discharge_receipt",
+    "ObservedEffects",
+    "ReconciliationResult",
+    "reconcile",
+    "FreshnessPort",
+    "InMemoryFreshness",
+    "CertificationResult",
+    "certify",
+    "audit_chain_verify",
 ]
 
 _LAZY = {
@@ -96,6 +108,15 @@ _LAZY = {
     "ExecutionResult": ("executor", "ExecutionResult"),
     "bind_constraints": ("executor", "bind_constraints"),
     "consume_and_execute": ("executor", "consume_and_execute"),
+    "issue_discharge_receipt": ("obligations", "issue_discharge_receipt"),
+    "ObservedEffects": ("reconciliation", "ObservedEffects"),
+    "ReconciliationResult": ("reconciliation", "ReconciliationResult"),
+    "reconcile": ("reconciliation", "reconcile"),
+    "FreshnessPort": ("certification", "FreshnessPort"),
+    "InMemoryFreshness": ("certification", "InMemoryFreshness"),
+    "CertificationResult": ("certification", "CertificationResult"),
+    "certify": ("certification", "certify"),
+    "audit_chain_verify": ("audit_chain", "audit_chain_verify"),
 }
 
 
