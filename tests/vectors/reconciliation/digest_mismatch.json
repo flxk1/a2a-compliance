@@ -1,0 +1,20 @@
+{
+  "action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "certified": true,
+  "expires_at": "2099-01-01T00:00:00+00:00",
+  "failed_receipts": [],
+  "invalid_receipts": [],
+  "issued_at": "2026-09-16T00:00:00+00:00",
+  "issuer": "issuer:assurance-recorder-1",
+  "key_id": "key-issuer-1",
+  "missing_receipts": [],
+  "nonce": "nonce-0001",
+  "open_receipts": [],
+  "reason": "all required postflight receipts satisfied",
+  "run_id": "run-0001",
+  "schema_version": "1.0.0",
+  "signature": "opaque-signature-not-verified-in-e0",
+  "state": "CERTIFIED",
+  "subject_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "type": "Reconciliation"
+}

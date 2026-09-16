@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:human-approval-receipt",
+  "title": "HumanApprovalReceipt",
+  "description": "Approver identity, permitted action digest, scope, expiry and explicit reservations (plan: 'Wire contracts'). Net-new. expiry is the envelope's expires_at. Structurally this object cannot bind to a prohibited action digest by itself — that a reserved/prohibited effect requires (or cannot receive) an approval is enforced by admission logic (E2), not by this schema; see docs/enforcement/threat-model.md.",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["approver", "permitted_action_digest", "scope", "reservations"],
+  "properties": {
+    "type": { "const": "HumanApprovalReceipt" },
+    "approver": {
+      "type": "object",
+      "required": ["id", "role"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "permitted_action_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "binds this approval to one exact admitted action digest" },
+    "scope": { "enum": ["next-action", "session"] },
+    "reservations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "explicit conditions the approver attached; an empty array means none were attached, never omitted"
+    }
+  }
+}

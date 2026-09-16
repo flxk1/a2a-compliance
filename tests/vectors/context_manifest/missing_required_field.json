@@ -1,0 +1,21 @@
+{
+  "applicable_planes": [
+    "deontic",
+    "norm",
+    "mandate"
+  ],
+  "capability_inventory_digest": "3144c9a4b7b5dc8b156b8f7c44835b0ad3d60cfc64d9d326a231e2fdc2039343",
+  "evidence_bundle_digest": "c72328a8bc9f247604137b8a47f8834f6ff53b5ee8edb2a27210c248a6a56972",
+  "expires_at": "2099-01-01T00:00:00+00:00",
+  "issued_at": "2026-09-16T00:00:00+00:00",
+  "issuer": "issuer:conductor-1",
+  "key_id": "key-issuer-1",
+  "nonce": "nonce-0001",
+  "request_digest": "c341ac2ed495a459150cc4aa62b0ba36a85455d97894d562c2381ca4509268dd",
+  "run_id": "run-0001",
+  "runtime_baseline_digest": "29695523999fbe319d70cb3d32278923c3c9a59a4bc75adf9dcb1e0e10059ab5",
+  "schema_version": "1.0.0",
+  "signature": "opaque-signature-not-verified-in-e0",
+  "subject_digest": "fde7d191b6ac24148a70a13ad942c8051e2be2c1ad0079d957632c8215dd7873",
+  "type": "ContextManifest"
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:revocation",
+  "title": "Revocation",
+  "description": "Key, policy, permit or run identifier plus effective time (plan: 'Wire contracts'). Net-new. issuer (envelope field) is expected to be an assurance-signer identity, distinct from policy authors/approvers/tool executors (plan: 'Fixed trust boundary'); this schema does not itself check the issuer's role — role bindings are deployment configuration (plan: 'Wire contracts').",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["revoked_type", "revoked_id", "effective_at"],
+  "properties": {
+    "type": { "const": "Revocation" },
+    "revoked_type": { "enum": ["key", "policy", "permit", "run"] },
+    "revoked_id": { "type": "string", "minLength": 1, "description": "key_id, policy digest, permit action_digest or run_id depending on revoked_type" },
+    "effective_at": { "type": "string", "format": "date-time" },
+    "reason": { "type": "string" }
+  }
+}

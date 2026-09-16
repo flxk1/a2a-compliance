@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:control-request",
+  "title": "ControlRequest",
+  "description": "Proposed action, actor, target, declared effects and data classifications (plan: 'Wire contracts'). Net-new wire form of the concept named ControlRequest in team.py; that in-process dataclass carries live GroundingContext/GovernanceBlock objects and is never itself serialised. Distinct identity from that type; do not conflate.",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["actor", "target", "proposed_action", "declared_effects", "data_classifications"],
+  "properties": {
+    "type": { "const": "ControlRequest" },
+    "actor": {
+      "type": "object",
+      "required": ["id", "role"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "proposed_action": {
+      "type": "object",
+      "required": ["bearer", "action"],
+      "properties": {
+        "bearer": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 },
+        "condition": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "declared_effects": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "effects the actor declares the action will have; an undeclared effect observed later is a drift/confused-deputy signal, not admitted by this field alone"
+    },
+    "data_classifications": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "sensitivity labels of data the action touches (e.g. pii, secret, public)"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capability": "tool:ingest_text",
+  "expires_at": "2099-01-01T00:00:00+00:00",
+  "input_digest": "input-ingest_text",
+  "issued_at": "2026-09-16T00:00:00+00:00",
+  "issuer": "issuer:evidence-grounder",
+  "key_id": "key-issuer-1",
+  "nonce": "nonce-0001",
+  "output_digest": "output-ingest_text",
+  "reason": "",
+  "role": "decision-verifier",
+  "run_id": "run-0001",
+  "schema_version": "1.0.0",
+  "signature": "opaque-signature-not-verified-in-e0",
+  "status": "SATISFIED",
+  "subject_digest": "84733e92d7983b68fd0d2698446879b0c9af355cce0b0cc4aa367107dcfaacbe",
+  "type": "StageReceipt"
+}

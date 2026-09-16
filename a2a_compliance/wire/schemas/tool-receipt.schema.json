@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:tool-receipt",
+  "title": "ToolReceipt",
+  "description": "Actual tool, arguments digest, result/effect digest, start/end time and executor identity (plan: 'Wire contracts'). Relates to a2a_compliance.lifecycle.ControlReceipt: dispatch_id is that dataclass's field, reused verbatim to bind one-or-more ToolReceipts to the ControlReceipt that dispatched them; effect_digest is the per-call analogue of ControlReceipt.observed_effects_digest (which aggregates across a dispatch).",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": [
+    "tool", "arguments_digest", "effect_digest", "started_at", "ended_at",
+    "executor", "dispatch_id", "action_digest"
+  ],
+  "properties": {
+    "type": { "const": "ToolReceipt" },
+    "tool": { "type": "string", "minLength": 1, "description": "the actual tool invoked, not the requested/nominal one" },
+    "arguments_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "effect_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "executor": {
+      "type": "object",
+      "required": ["id", "role"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "dispatch_id": { "type": "string", "minLength": 1 },
+    "action_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

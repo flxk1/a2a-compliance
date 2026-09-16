@@ -1,0 +1,21 @@
+{
+  "approver": {
+    "id": "human-1",
+    "role": "approver"
+  },
+  "expires_at": "2099-01-01T00:00:00+00:00",
+  "issued_at": "2026-09-16T00:00:00+00:00",
+  "issuer": "approver:human-1",
+  "key_id": "key-issuer-1",
+  "nonce": "nonce-0001",
+  "permitted_action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reservations": [
+    "no network egress"
+  ],
+  "run_id": "run-0001",
+  "schema_version": "1.0.0",
+  "scope": "session",
+  "signature": "opaque-signature-not-verified-in-e0",
+  "subject_digest": "7ff7f38d89bfcdd5a9bcdab74b10d835f027303273c0c3080a373306e27ebac6",
+  "type": "HumanApprovalReceipt"
+}

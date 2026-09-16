@@ -1,0 +1,22 @@
+{
+  "action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "arguments_digest": "17f02f6bb731a7fc36c8a0ea62a73f403d1a0159b2f8fe7b6574d37835df3f1c",
+  "dispatch_id": "dispatch-0001",
+  "effect_digest": "51d6afdc0b592487f71a8920d91f576f002a8de61d9b4b6a925897131e5e3224",
+  "ended_at": "2026-09-16T00:00:02+00:00",
+  "executor": {
+    "id": "runner-1",
+    "role": "tool-executor"
+  },
+  "expires_at": "2099-01-01T00:00:00+00:00",
+  "issued_at": "2026-09-16T00:00:00+00:00",
+  "issuer": "executor:runner-1",
+  "key_id": "key-issuer-1",
+  "nonce": "nonce-0001",
+  "run_id": "run-0001",
+  "schema_version": "1.0.0",
+  "signature": "opaque-signature-not-verified-in-e0",
+  "started_at": "2026-09-16T00:00:01+00:00",
+  "subject_digest": "b7c611bb4e0a9fc28b87e0e7c37294fb68dd073c87392f767fbd9193e7567656",
+  "type": "ToolReceipt"
+}

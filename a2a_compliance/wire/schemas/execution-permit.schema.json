@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:execution-permit",
+  "title": "ExecutionPermit",
+  "description": "Final admitted action digest, enforcement grade, adapter, constraints, expiry and single-use nonce (plan: 'Wire contracts'). Schema only — E0 defines this shape; issuing one (deciding admission) is E2 scope. The plan's single-use nonce IS the envelope's nonce field; there is no second nonce. Platform names never enter this schema (plan: 'Host adapters') — adapter is a free identifier of an adapter class (e.g. 'subprocess'), not a product name.",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["action_digest", "enforcement_grade", "adapter", "constraints"],
+  "properties": {
+    "type": { "const": "ExecutionPermit" },
+    "action_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "enforcement_grade": {
+      "enum": ["advisory", "mediated", "platform"],
+      "description": "plan: only mediated/platform are enforcement; advisory may be ignored by the caller"
+    },
+    "adapter": { "type": "string", "minLength": 1 },
+    "constraints": {
+      "type": "object",
+      "description": "lane/lock/drift bindings and any other admission-time constraint; free-form, host- and adapter-defined"
+    }
+  }
+}
