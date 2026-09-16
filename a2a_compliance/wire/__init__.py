@@ -5,7 +5,10 @@ admission decision plus permit issuance (E2, `admission.py`), a mediated
 executor that consumes an admitted permit's nonce and produces a signed
 ToolReceipt (E3, `executor.py`), and postflight assurance -- verified
 effect reconciliation, obligation discharge and certification (E4,
-`reconciliation.py`/`obligations.py`/`certification.py`/`audit_chain.py`).
+`reconciliation.py`/`obligations.py`/`certification.py`/`audit_chain.py`),
+and the portable conformance kit plus enforcement-grade profile contract
+(E5, `conformance_kit.py` -- `run_conformance`/`Profile`; host-neutral only,
+see that module's docstring for the out-of-scope distribution half).
 No host
 effect at any point: the real effect lives only behind the `ExecutorPort` a
 host injects into `consume_and_execute` -- see `examples/subprocess_adapter.py`
@@ -74,6 +77,15 @@ __all__ = [
     "CertificationResult",
     "certify",
     "audit_chain_verify",
+    "ConformancePorts",
+    "ScenarioResult",
+    "ConformanceReport",
+    "GRADES",
+    "GradeClaimRejected",
+    "Profile",
+    "InMemoryConformanceExecutor",
+    "dev_conformance_ports",
+    "run_conformance",
 ]
 
 _LAZY = {
@@ -117,6 +129,15 @@ _LAZY = {
     "CertificationResult": ("certification", "CertificationResult"),
     "certify": ("certification", "certify"),
     "audit_chain_verify": ("audit_chain", "audit_chain_verify"),
+    "ConformancePorts": ("conformance_kit", "ConformancePorts"),
+    "ScenarioResult": ("conformance_kit", "ScenarioResult"),
+    "ConformanceReport": ("conformance_kit", "ConformanceReport"),
+    "GRADES": ("conformance_kit", "GRADES"),
+    "GradeClaimRejected": ("conformance_kit", "GradeClaimRejected"),
+    "Profile": ("conformance_kit", "Profile"),
+    "InMemoryConformanceExecutor": ("conformance_kit", "InMemoryConformanceExecutor"),
+    "dev_conformance_ports": ("conformance_kit", "dev_conformance_ports"),
+    "run_conformance": ("conformance_kit", "run_conformance"),
 }
 
 
