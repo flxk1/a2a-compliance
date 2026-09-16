@@ -62,7 +62,7 @@ Runtime controls. `ComplianceTeam` assigns the 41 repositories to eight roles. O
 
 ## Status
 
-0.2.0 · 74 tests · Python >=3.10 · enforcement preview only
+0.3.0 · 163 tests · Python >=3.10 · enforcement preview only
 
 ## License
 

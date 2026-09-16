@@ -2,6 +2,18 @@
 <!-- Copyright 2026 flxk1 -->
 # Changelog
 
+## 0.3.0
+
+Enforcement wire contracts. `a2a_compliance.wire` defines the envelopes the
+control plane exchanges — control request, execution permit, human-approval
+receipt, stage receipt, tool receipt, reconciliation, revocation, context
+manifest — each as a JSON schema with a verifier for expiry, digest match,
+replay and role ownership, and conformance vectors covering the negative cases.
+Digests are taken over a canonical serialisation, and `ControlPlan.action_digest`
+now uses it, so a digest computed here and one computed by a host agree. A sync
+test holds each schema against the dataclass it mirrors. The wire package is
+imported lazily, so a bare install stays free of its schema dependencies.
+
 ## 0.2.0
 
 Full-family compliance team: `ComplianceTeam` plans a maker action across the
