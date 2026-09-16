@@ -31,6 +31,7 @@
     "action_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "input_digest": { "type": "string", "minLength": 1 },
     "output_digest": { "type": ["string", "null"] },
-    "reason": { "type": "string" }
+    "reason": { "type": "string" },
+    "prev_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "OPTIONAL: the subject_digest (NOT the signature, NOT a whole-envelope hash) of the immediately preceding receipt in this chain; absent only on a chain's first (genesis) receipt. See wire/chain.py:verify_chain." }
   }
 }

@@ -256,6 +256,53 @@ def test_chain_missing_link_broken_genesis_is_rejected():
     assert any("chain[0]" in e and "anchor" in e for e in result.errors), result.errors
 
 
+def test_chain_broken_link_prev_digest_names_no_receipt_is_rejected():
+    # 003_broken_link is individually well-formed and correctly signed, but
+    # its prev_digest (0xbb...) names no receipt at all -- not 000's digest.
+    receipts = _chain("000_valid.json", "003_broken_link.json")
+    result = verify_chain(receipts, "StageReceipt", trust_store=_trust_store())
+    assert result.ok is False
+    assert any("chain[1]" in e and "broken link" in e for e in result.errors), result.errors
+
+
+def test_chain_reparented_receipt_is_rejected():
+    # 004_reparented is individually well-formed AND correctly signed --
+    # signature verification alone would pass it -- but its prev_digest
+    # names 002's (a genuinely real, valid) digest, not 000's, its actual
+    # predecessor in this chain. verify_chain must recompute 000's digest
+    # itself rather than trust the claimed field.
+    receipts = _chain("000_valid.json", "004_reparented.json")
+    result = verify_chain(receipts, "StageReceipt", trust_store=_trust_store())
+    assert result.ok is False
+    assert any("chain[1]" in e and "broken link" in e for e in result.errors), result.errors
+    # each element individually verifies (correctly signed) -- only the
+    # lineage check fails.
+    for r in receipts:
+        assert verify(r, "StageReceipt", trust_store=_trust_store()).ok
+
+
+def test_chain_requires_prev_digest_on_non_genesis_receipts():
+    # A non-genesis receipt with prev_digest entirely absent is rejected,
+    # distinctly from a wrong-value broken link.
+    second = _load("chain", "001_valid.json")
+    second.pop("prev_digest")
+    # re-digest/sign so this is an individually well-formed, correctly
+    # signed receipt that simply omits the chain-linkage field.
+    from a2a_compliance.wire import canonical, signing
+    second.pop("signature", None)
+    second.pop("subject_digest", None)
+    second["subject_digest"] = canonical.subject_digest(second)
+    second["signature"] = signing.dev_sign_subject(
+        second, bytes.fromhex(KEYS["key-signer-1"]["private_hex"]),
+    )
+    receipts = [_load("chain", "000_valid.json"), second]
+    result = verify_chain(receipts, "StageReceipt", trust_store=_trust_store())
+    assert result.ok is False
+    assert any(
+        "chain[1]" in e and "prev_digest is required" in e for e in result.errors
+    ), result.errors
+
+
 def test_empty_chain_is_rejected():
     result = verify_chain([], "StageReceipt")
     assert result.ok is False
@@ -272,6 +319,45 @@ def test_chain_composes_with_revocation():
     )
     assert result.ok is False
     assert any("revoked: key_id" in e for e in result.errors), result.errors
+
+
+# --- digest/signature serialization unification guard -----------------------
+#
+# team.py's action_digest is already unified on canonical.digest_hex (see
+# "Unify action_digest on canonical JCS" ); this guards the same invariant
+# on the E1 signing path: the DSSE signature must be computed over the EXACT
+# same canonical bytes subject_digest hashes, so no second (e.g. json.dumps)
+# serialization can silently diverge from what is digested.
+
+def test_pae_bytes_is_dsse_pae_over_the_same_canonical_bytes_as_the_digest():
+    import hashlib
+
+    from a2a_compliance.wire import canonical, signing
+
+    obj = _load("stage_receipt", "valid.json")
+    subject_bytes = canonical.canonical_bytes(canonical.subject(obj))
+
+    expected_pae = (
+        b"DSSEv1 " + str(len(signing.DSSE_PAYLOAD_TYPE)).encode("ascii")
+        + b" " + signing.DSSE_PAYLOAD_TYPE.encode("utf-8")
+        + b" " + str(len(subject_bytes)).encode("ascii") + b" " + subject_bytes
+    )
+    assert signing.pae_bytes(obj) == expected_pae
+
+    # the same bytes subject_digest hashes -- byte-identical, not just
+    # equal-after-reparsing.
+    assert hashlib.sha256(subject_bytes).hexdigest() == canonical.subject_digest(obj)
+    assert hashlib.sha256(subject_bytes).hexdigest() == obj["subject_digest"]
+
+
+def test_signing_module_has_no_second_json_serialization_path():
+    import inspect
+
+    from a2a_compliance.wire import signing
+
+    source = inspect.getsource(signing)
+    assert "json.dumps" not in source
+    assert "import json" not in source
 
 
 # --- bare-install proof: this whole module's imports must not need
