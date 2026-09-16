@@ -1,8 +1,12 @@
 """Enforcement wire contracts: JSON Schemas, RFC 8785 canonical digest, a
 pure fail-closed verifier (E0), DSSE/Ed25519 signature verification,
-trust-role bindings, revocation and receipt-chain linkage (E1), and a
-verified admission decision plus permit issuance (E2, `admission.py`). No
-host effect at any point.
+trust-role bindings, revocation and receipt-chain linkage (E1), a verified
+admission decision plus permit issuance (E2, `admission.py`), and a mediated
+executor that consumes an admitted permit's nonce and produces a signed
+ToolReceipt (E3, `executor.py`). No host effect at any point: the real
+effect lives only behind the `ExecutorPort` a host injects into
+`consume_and_execute` -- see `examples/subprocess_adapter.py` for the
+conformance adapter, which is not part of this package.
 
 `canonical` is stdlib-only and imported eagerly, so `a2a_compliance.wire.canonical`
 (and anything that only needs it, e.g. `team.py`'s action_digest) is importable
@@ -53,6 +57,11 @@ __all__ = [
     "dev_issuer",
     "PermitIssueResult",
     "issue_permit",
+    "ExecutionOutcome",
+    "ExecutorPort",
+    "ExecutionResult",
+    "bind_constraints",
+    "consume_and_execute",
 ]
 
 _LAZY = {
@@ -82,6 +91,11 @@ _LAZY = {
     "dev_issuer": ("admission", "dev_issuer"),
     "PermitIssueResult": ("admission", "PermitIssueResult"),
     "issue_permit": ("admission", "issue_permit"),
+    "ExecutionOutcome": ("executor", "ExecutionOutcome"),
+    "ExecutorPort": ("executor", "ExecutorPort"),
+    "ExecutionResult": ("executor", "ExecutionResult"),
+    "bind_constraints": ("executor", "bind_constraints"),
+    "consume_and_execute": ("executor", "consume_and_execute"),
 }
 
 

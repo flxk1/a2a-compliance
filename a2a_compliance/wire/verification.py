@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Optional, Protocol
 
 from ..lifecycle import TOOL_OWNERS
@@ -24,24 +25,54 @@ from .trust import RevocationStore, TrustStore
 class NonceStore(Protocol):
     """Injected port (E0 defines the interface; a host supplies a durable
     implementation). Scoped by (run_id, nonce): the same nonce value issued
-    under two different runs is not a replay of either."""
+    under two different runs is not a replay of either.
+
+    `seen`/`record` (E0/E1) are a two-step check-then-write used by
+    `verify()`'s optional replay check and by E2's `issue_permit` single-use
+    nonce guard -- not atomic by contract, fine for those callers because
+    nothing else races them in this package.
+
+    `consume` (E3) is DISTINCT: a single atomic compare-and-set a host
+    implements durably (e.g. one conditional UPDATE) -- `True` the first
+    time a given `(run_id, nonce)` is consumed, `False` on every call after
+    that, including concurrent/racing ones. `wire.executor.consume_and_execute`
+    calls ONLY `consume`, never `seen`/`record`, so an ExecutionPermit's
+    nonce has exactly one guarded consumption path before dispatch (plan:
+    'The host atomically consumes the nonce before dispatch. A second
+    consumption fails.')."""
 
     def seen(self, run_id: str, nonce: str) -> bool: ...
 
     def record(self, run_id: str, nonce: str) -> None: ...
 
+    def consume(self, run_id: str, nonce: str) -> bool: ...
+
 
 class InMemoryNonceStore:
-    """Test-only in-memory NonceStore. Not durable; never use in a host."""
+    """Test-only in-memory NonceStore. Not durable; never use in a host.
+    `consume` uses its own lock and its own set, independent of
+    `seen`/`record`'s bookkeeping -- the two mechanisms guard different
+    nonce usages (E0/E1 replay-of-a-signed-object vs. E3 single-use
+    dispatch) and must not be conflated even in this test double."""
 
     def __init__(self) -> None:
         self._seen: set[tuple[str, str]] = set()
+        self._consumed: set[tuple[str, str]] = set()
+        self._lock = Lock()
 
     def seen(self, run_id: str, nonce: str) -> bool:
         return (run_id, nonce) in self._seen
 
     def record(self, run_id: str, nonce: str) -> None:
         self._seen.add((run_id, nonce))
+
+    def consume(self, run_id: str, nonce: str) -> bool:
+        key = (run_id, nonce)
+        with self._lock:
+            if key in self._consumed:
+                return False
+            self._consumed.add(key)
+            return True
 
 
 @dataclass(frozen=True)
