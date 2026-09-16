@@ -12,13 +12,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-import hashlib
 import json
 from importlib.resources import files
 from typing import Iterable, Optional
 
 from .governance_block import GovernanceBlock, SteerDecision, SteerRuling
 from .grounding import ACTION_ROUTE_HUMAN, GroundingContext, GroundingResult
+from .wire import canonical
 
 
 class TeamProfile(str, Enum):
@@ -328,10 +328,11 @@ class ComplianceTeam:
             "target_kind": request.target_kind,
             "proposed_action": request.context.proposed_action,
         }
-        action_digest = hashlib.sha256(json.dumps(
-            action_subject, ensure_ascii=False, sort_keys=True,
-            separators=(",", ":"), allow_nan=False,
-        ).encode("utf-8")).hexdigest()
+        # One canonical digest implementation (RFC 8785 JCS) for every wire
+        # and in-process digest in this package; team.py no longer runs its
+        # own json.dumps(sort_keys=True) hash, which silently diverges from
+        # JCS on some numeric literals (e.g. 1e20).
+        action_digest = canonical.digest_hex(action_subject)
 
         return ControlPlan(
             profile=request.profile,

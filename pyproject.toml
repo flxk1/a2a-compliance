@@ -18,9 +18,14 @@ keywords = ["a2a", "compliance", "fleet", "orchestration", "multi-agent", "value
 # path when its package is missing, so the base install stays importable and
 # functional with neither installed (SPEC invariant 1/2 concern only
 # Loomground planes or a host adapter, which this repo never hard-depends on).
-# a2a_compliance.wire (E0) hard-imports jsonschema/referencing, but only when
-# something explicitly imports that submodule; the top-level package never
-# imports .wire, so a bare install stays importable with neither installed.
+# a2a_compliance.wire.canonical (RFC 8785 JCS + digest) is stdlib-only and
+# imported eagerly by both a2a_compliance.wire and team.py (one canonical
+# action_digest implementation). a2a_compliance.wire.schema_registry/verify
+# hard-import jsonschema/referencing but are loaded lazily off wire/__init__
+# (PEP 562 __getattr__), so a bare install — including `import a2a_compliance`,
+# which imports team.py — stays importable with neither installed; only
+# touching wire.WIRE_TYPES/load_schema/validator_for/verify/NonceStore/
+# InMemoryNonceStore/VerificationResult actually requires them.
 dependencies = []
 
 [project.optional-dependencies]
