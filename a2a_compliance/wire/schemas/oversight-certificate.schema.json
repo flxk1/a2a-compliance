@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:oversight-certificate",
+  "title": "OversightCertificate",
+  "description": "E4 (plan: 'oversight-certificate' -- Postflight assurance; 'Cannot certify unadmitted, mismatched or incomplete run'). Issued ONLY by wire.certification.certify(), and only when every gate holds: the permit E1-verifies and was issued at an enforcement grade (mediated/platform); every ToolReceipt E1-verifies and binds this action_digest; the Reconciliation E1-verifies, binds this action_digest, and is certified=true with zero residuals; every blocking obligation has a verified ObligationDischargeReceipt bound to this action_digest; all mandatory sources are fresh. Binds the exact run by content-addressed digest reference (permit_digest, reconciliation_digest, tool_receipt_digests) rather than embedding those objects, so a certificate cannot be replayed against a different/tampered permit, reconciliation or receipt set without the digest fields failing to match on re-verification (see wire/audit_chain.py:audit_chain_verify). A successful ToolReceipt alone can never produce this object: certify() requires the Reconciliation's own certified=true (effects matched) in addition to receipt verification.",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": [
+    "action_digest", "permit_digest", "reconciliation_digest",
+    "tool_receipt_digests", "discharged_obligation_digests", "certifier"
+  ],
+  "properties": {
+    "type": { "const": "OversightCertificate" },
+    "action_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "permit_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "subject_digest of the ExecutionPermit this certificate attests" },
+    "reconciliation_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "subject_digest of the certified=true, zero-residual Reconciliation this certificate attests" },
+    "tool_receipt_digests": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+      "description": "subject_digest of every ToolReceipt this certificate attests, in the order reconciled; a removed/reordered/inserted receipt changes this list"
+    },
+    "discharged_obligation_digests": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+      "description": "subject_digest of the verified ObligationDischargeReceipt for each blocking obligation this run required; empty array means no blocking obligations applied, never omitted"
+    },
+    "certifier": {
+      "type": "object",
+      "required": ["id", "role"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "description": "the assurance-signer identity; must be distinct from the permit issuer, every tool-receipt recorder/executor and the approver in this run (role separation, plan: 'Fixed trust boundary')"
+    },
+    "prev_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "OPTIONAL: the subject_digest of the immediately preceding object in the run's audit chain (typically the Reconciliation); absent only on a chain's first (genesis) element. See wire/audit_chain.py:audit_chain_verify." }
+  }
+}

@@ -25,6 +25,17 @@ WIRE_TYPES: dict[str, str] = {
     "Revocation": "revocation.schema.json",
 }
 
+# E4: postflight assurance types, additive -- kept OUT of WIRE_TYPES itself so
+# the E0 "exactly eight wire types" invariant (test_all_eight_wire_types_are_
+# registered) stays true byte-for-byte; ALL_WIRE_TYPES is the superset every
+# loader/registry/verify() lookup below actually uses.
+E4_WIRE_TYPES: dict[str, str] = {
+    "ObligationDischargeReceipt": "obligation-discharge-receipt.schema.json",
+    "OversightCertificate": "oversight-certificate.schema.json",
+}
+
+ALL_WIRE_TYPES: dict[str, str] = {**WIRE_TYPES, **E4_WIRE_TYPES}
+
 
 def _schemas_dir():
     return files("a2a_compliance.wire.schemas")
@@ -32,9 +43,9 @@ def _schemas_dir():
 
 @lru_cache(maxsize=None)
 def load_schema(type_name: str) -> dict:
-    if type_name not in WIRE_TYPES:
+    if type_name not in ALL_WIRE_TYPES:
         raise KeyError(f"unknown wire type: {type_name!r}")
-    path = _schemas_dir().joinpath(WIRE_TYPES[type_name])
+    path = _schemas_dir().joinpath(ALL_WIRE_TYPES[type_name])
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -49,7 +60,7 @@ def _registry() -> Registry:
     registry = Registry().with_resource(
         _BASE_ID, Resource.from_contents(_envelope_base_schema()),
     )
-    for type_name in WIRE_TYPES:
+    for type_name in ALL_WIRE_TYPES:
         schema = load_schema(type_name)
         registry = registry.with_resource(schema["$id"], Resource.from_contents(schema))
     return registry

@@ -18,7 +18,7 @@ from typing import Optional, Protocol
 
 from ..lifecycle import TOOL_OWNERS
 from . import canonical
-from .schema_registry import WIRE_TYPES, validator_for
+from .schema_registry import ALL_WIRE_TYPES, validator_for
 from .trust import RevocationStore, TrustStore
 
 
@@ -171,7 +171,7 @@ def verify(
 
     `trust_store`/`revocation_store` are E1 ports: omit both and this is the
     E0 verifier (signature opaque, no revocation check) byte-for-byte."""
-    if obj_type not in WIRE_TYPES:
+    if obj_type not in ALL_WIRE_TYPES:
         return VerificationResult(False, (f"unknown type: {obj_type!r}",))
     if not isinstance(obj, dict):
         return VerificationResult(False, ("object is not a JSON object",))

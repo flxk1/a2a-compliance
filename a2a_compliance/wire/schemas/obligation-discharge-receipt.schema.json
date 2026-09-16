@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-compliance:wire:obligation-discharge-receipt",
+  "title": "ObligationDischargeReceipt",
+  "description": "E4 (plan: 'obligation-discharge' -- Certification requires all blocking obligations discharged). Binds one obligation_id to the action_digest of the run it was discharged for, and the discharger identity/role that attests it. Fixes an E2 caveat: E2's issue_permit only accepted a caller-asserted set of acknowledged_obligations (a bare string is not evidence); this receipt is the VERIFIED evidence a blocking obligation is actually discharged -- wire.certification.certify() counts an obligation discharged only when a matching instance of this object E1-verify()s (signature, trust binding, expiry, revocation) and binds the same action_digest, never from a caller-supplied list alone.",
+  "allOf": [{ "$ref": "urn:a2a-compliance:wire:envelope-base" }],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["obligation_id", "action_digest", "discharged_by"],
+  "properties": {
+    "type": { "const": "ObligationDischargeReceipt" },
+    "obligation_id": { "type": "string", "minLength": 1 },
+    "action_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "discharged_by": {
+      "type": "object",
+      "required": ["id", "role"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "prev_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "OPTIONAL: the subject_digest (NOT the signature, NOT a whole-envelope hash) of the immediately preceding object in a chain this receipt participates in; absent only on a chain's first (genesis) element. See wire/chain.py:verify_chain and wire/audit_chain.py:audit_chain_verify." }
+  }
+}
