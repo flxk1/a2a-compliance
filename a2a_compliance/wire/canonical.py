@@ -116,6 +116,14 @@ def digest_hex(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
+def subject(obj: dict) -> dict:
+    """The signed/digested portion of a wire object: itself with `signature`
+    and `subject_digest` removed. Both `subject_digest` (below) and E1's
+    `wire.signing` DSSE construction call this SAME function, so what gets
+    hashed and what gets signed can never silently diverge."""
+    return {k: v for k, v in obj.items() if k not in ("signature", "subject_digest")}
+
+
 def subject_digest(obj: dict) -> str:
     """RFC 8785 digest over an object with its `signature` field removed —
     this is the wire `subject_digest`. `subject_digest` itself is also
@@ -124,5 +132,4 @@ def subject_digest(obj: dict) -> str:
     fields); the plan's "object minus the signature field" is read that way,
     since a literal minus-only-signature reading is self-referential and
     cannot be satisfied by any value."""
-    subject = {k: v for k, v in obj.items() if k not in ("signature", "subject_digest")}
-    return digest_hex(subject)
+    return digest_hex(subject(obj))

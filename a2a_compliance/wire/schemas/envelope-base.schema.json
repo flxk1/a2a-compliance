@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:a2a-compliance:wire:envelope-base",
   "title": "Signed envelope base",
-  "description": "Fields every E0 wire object carries (plan: 'Wire contracts'). signature is opaque in E0 (E1 verifies it). subject_digest = sha256 of the RFC 8785 canonical bytes of the object with signature removed.",
+  "description": "Fields every wire object carries (plan: 'Wire contracts'). subject_digest = sha256 of the RFC 8785 canonical bytes of the object with signature/subject_digest removed. signature (E1) is a base64 Ed25519 signature over the DSSE Pre-Authentication Encoding of that same canonical subject (see wire/signing.py); E0 treated it as opaque. prev_digest (E1, OPTIONAL) is receipt-chain linkage: the subject_digest of the immediately prior object in a chain (see wire/chain.py:verify_chain); absent on a chain's first (genesis) object and on any object that is not part of a chain, so E0 objects validate unchanged.",
   "type": "object",
   "required": [
     "schema_version", "type", "issuer", "issued_at", "expires_at",
@@ -17,7 +17,8 @@
     "run_id": { "type": "string", "minLength": 1 },
     "nonce": { "type": "string", "minLength": 1, "description": "single-use per (run_id, nonce); consumed atomically by the host before dispatch (E3)" },
     "subject_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "key_id": { "type": "string", "minLength": 1, "description": "identifies the signing key; E0 does not resolve it to a trust root" },
-    "signature": { "type": "string", "description": "opaque in E0; not verified until E1" }
+    "key_id": { "type": "string", "minLength": 1, "description": "identifies the signing key; resolved to a trust root by an injected TrustStore (E1), never from this payload" },
+    "signature": { "type": "string", "description": "base64 Ed25519 signature over the DSSE PAE of the canonical subject (E1); verified only when a TrustStore is supplied to wire.verify.verify" },
+    "prev_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "OPTIONAL (E1): subject_digest of the immediately prior object in this receipt chain; see wire/chain.py:verify_chain" }
   }
 }

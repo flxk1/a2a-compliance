@@ -1,0 +1,22 @@
+{
+  "key-signer-1": {
+    "note": "bound in tests to StageReceipt + role evidence-grounder",
+    "private_hex": "097ac6ba445bcabd31a4ecc6f8434799b956bb30c3be890cec934856e6122869",
+    "public_hex": "5ab346f61fdad6d3b0d4c7ad20a614bbafd10fa8c9ded7907e0e5d87c0738444"
+  },
+  "key-signer-other": {
+    "note": "a distinct, UNTRUSTED (not added to the test TrustStore) signer -- used for the wrong_key vector",
+    "private_hex": "93e4a03355732731c4680c0f2c910456e49c970ce1058d6e22e1f40f44b0e5b1",
+    "public_hex": "4ef4121c7f7d0b6d89c9a3485a100bcf6ff92f10b376144037575b5bca497374"
+  },
+  "key-signer-wrong-role": {
+    "note": "bound in tests to StageReceipt + role policy-author only (not evidence-grounder)",
+    "private_hex": "51a7cbd744e5492a9bf7f5c2ea084e215daf2134c8da6d94a241189efb91790d",
+    "public_hex": "d446615e3cbe9db290f4f839d51a841097d1cc23ff8b31b188e9e6f87f0de9b2"
+  },
+  "key-signer-wrong-type": {
+    "note": "bound in tests to ExecutionPermit only (not StageReceipt)",
+    "private_hex": "a54c2bfbdc3434f57896a15293fc91e59a99f6171d0fd8a94d6f0541c5db7fdf",
+    "public_hex": "82d26b31461533c3ab6df6aa527f6555b04fcd430e79096b00ae5b570e1809ad"
+  }
+}
