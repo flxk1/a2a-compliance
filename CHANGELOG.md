@@ -2,6 +2,15 @@
 <!-- Copyright 2026 flxk1 -->
 # Changelog
 
+## Unreleased
+
+Fixed: `from a2a_compliance.wire import verify` returned the `verify`
+submodule object (non-callable) instead of the `verify` function when a
+`wire` submodule had already been imported first, anywhere in the process.
+The undocumented import path `a2a_compliance.wire.verify` no longer exists;
+the module is renamed to `a2a_compliance.wire.verification`. The public
+`verify` function export and `a2a_compliance.wire.__all__` are unchanged.
+
 ## 0.3.0
 
 Enforcement wire contracts. `a2a_compliance.wire` defines the envelopes the
