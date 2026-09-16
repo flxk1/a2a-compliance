@@ -109,6 +109,36 @@ def test_stage_receipt_satisfied_needs_an_output_digest():
     assert any("schema:" in e for e in result.errors), result.errors
 
 
+def test_stage_receipt_satisfied_rejects_null_output_digest():
+    # regression: schema must mirror the dataclass's `not self.output_digest`
+    # test (null is falsy), not just field presence.
+    obj = _load(VECTORS / "stage_receipt" / "satisfied_output_digest_null.json")
+    assert obj["output_digest"] is None
+    result = verify(obj, "StageReceipt")
+    assert result.ok is False
+    assert any("schema:" in e for e in result.errors), result.errors
+
+
+def test_stage_receipt_satisfied_rejects_empty_output_digest():
+    # regression: "" is present and non-null but still falsy -- the dataclass
+    # rejects it; a presence-only schema check would not.
+    obj = _load(VECTORS / "stage_receipt" / "satisfied_output_digest_empty.json")
+    assert obj["output_digest"] == ""
+    result = verify(obj, "StageReceipt")
+    assert result.ok is False
+    assert any("schema:" in e for e in result.errors), result.errors
+
+
+def test_stage_receipt_not_applicable_rejects_whitespace_only_reason():
+    # regression: schema must mirror the dataclass's `reason.strip()` test,
+    # not bare minLength (which whitespace-only strings satisfy).
+    obj = _load(VECTORS / "stage_receipt" / "not_applicable_reason_whitespace.json")
+    assert obj["reason"].strip() == ""
+    result = verify(obj, "StageReceipt")
+    assert result.ok is False
+    assert any("schema:" in e for e in result.errors), result.errors
+
+
 def test_replayed_nonce_is_rejected_on_second_use():
     first = _load(VECTORS / "replay" / "first.json")
     second = _load(VECTORS / "replay" / "second.json")
