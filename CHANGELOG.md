@@ -48,6 +48,19 @@ requires both the observed bypass-rejection and the host's attestation that the
 tool has no path around the proxy, since the kit cannot observe that structural
 fact itself.
 
+### Changed
+
+The README status line states both what `main` carries and how much of it is
+tagged, and the interface lists the admission, execution, assurance and
+conformance entry points alongside the boundary they do not cross: mediation
+reaches only effects routed through the mediated executor, and dispatch,
+enforcement, erasure and evidence writing stay host acts. The install paragraph
+names the `crypto` extra and `referencing`. `tests/test_readme_claims.py`
+re-derives every counted claim in the README -- test count, Python floor,
+released version, extras, role/plane/repository counts -- from the collected
+suite, `pyproject.toml`, the CHANGELOG and the package, so a claim that stops
+being true fails the suite.
+
 ## 0.4.0
 
 Signed receipt chain. Receipts are signed with Ed25519 over the same canonical
