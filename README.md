@@ -66,7 +66,7 @@ Runtime controls. `ComplianceTeam` assigns the 41 repositories to eight roles. O
 
 ## Status
 
-301 tests · Python >=3.10 · latest tagged release 0.4.0
+305 tests · Python >=3.10 · latest tagged release 0.4.0
 
 `main` carries the whole enforcement chain: admission over verified stage receipts, single-use signed execution permits, mediated execution in which a replayed, tampered, expired or revoked permit produces no effect, postflight reconciliation of observed effects against the permit, and an oversight certificate issued only when every check passes and the certifier is a distinct identity from the issuer, the executors, the reconciler and the approver. The 0.4.0 tag predates that chain, which is recorded under `Unreleased` in the [CHANGELOG](CHANGELOG.md).
 

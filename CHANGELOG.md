@@ -61,6 +61,16 @@ released version, extras, role/plane/repository counts -- from the collected
 suite, `pyproject.toml`, the CHANGELOG and the package, so a claim that stops
 being true fails the suite.
 
+The intended-versus-observed effect comparison is the `effect-reconciliation`
+plane's computation and reaches the receipt-gated lifecycle only as that plane's
+role-owned `tool:effect_reconcile` receipt: `lifecycle.reconcile` folds
+postflight receipts and compares no effects of its own.
+`tests/test_effect_reconciliation_delegation.py` pins the boundary -- the
+declared owner, the fail-closed requirement, the fold's indifference to any
+effect digest it is handed, and the absence of an import of the plane -- so a
+later consolidation of the comparison into the lifecycle fails the suite. No
+public signature changed.
+
 ## 0.4.0
 
 Signed receipt chain. Receipts are signed with Ed25519 over the same canonical
