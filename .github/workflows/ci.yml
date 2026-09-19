@@ -33,19 +33,19 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: flxk1/loomground-mandate
-          ref: bf147383509813e3bfd7bc4a2770a42a6072aa4d
+          ref: 70244429255e69a18aea9a99c2bb3fb56090904f
           path: loomground-repos/loomground-mandate
       - name: checkout loomground-escalation (on-disk plane src)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: flxk1/loomground-escalation
-          ref: 82c3e05f2241383e210e5621591c9072b894232f
+          ref: e398bb900657ae210b35239f0235083b185279fb
           path: loomground-repos/loomground-escalation
       - name: checkout loomground-falsifiability (on-disk plane src)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: flxk1/loomground-falsifiability
-          ref: 2e000ca163a92b9b897e83b3030291468daaea30
+          ref: e146366501bce91ec10757823dc2c9962b4d7b88
           path: loomground-repos/loomground-falsifiability
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
@@ -56,11 +56,11 @@ jobs:
       - name: install a2a-compliance + the remaining value planes
         run: |
           python3 -m pip install "./a2a-compliance[dev]"
-          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-deontic.git@35f8eabdc533b275a086b20c8d7a161f4acc46a8"
-          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-norm.git@104a3ca2272e34898b23fa43ba164e968d8f1001"
-          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-proxy.git@c3936382b494bf1942943294ec537418354d4178"
-          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-governance.git@270e11d0bbded46c810b2fe56559323d6dcd969a"
-          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-solver.git@5f674da3dab5a0763d4cb61bae576797ebd5f788"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-deontic.git@319e218500da42dea693830ff790343aa340bd60"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-norm.git@9d5f68f140dc8a904306eb265e19ddfb4dd4562a"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-proxy.git@1dddf66c3b988f51ea846dd102b9049c915362e3"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-governance.git@82c7613e4a2247218a7281dd99933ed7c9e31218"
+          python3 -m pip install --no-deps "git+https://github.com/flxk1/loomground-solver.git@c6f360ba6adfd81130d984b1c5818c5d551d94b8"
       # policy-compiler sibling intentionally absent — the two compile-to-ground
       # tests self-skip per their own skipif, honestly.
       - name: test
