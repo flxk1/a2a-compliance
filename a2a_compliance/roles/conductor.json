@@ -4,7 +4,7 @@
   "purpose": "Own the control plan, governance boundary and hand-offs.",
   "inputs": ["control_request", "role_receipts"],
   "outputs": ["control_plan", "bounded_recommendation"],
-  "allowed_capabilities": ["contract:loomground", "contract:loomground-governance", "contract:loomground-workspace", "contract:loomground-vertical", "contract:skill-governance-block", "contract:loomground-ref", "contract:a2a-compliance", "distribution:loomground-plugins", "distribution:loomground-patchbay", "distribution:loomground-mcp", "skill:loomground"],
+  "allowed_capabilities": ["contract:loomground", "contract:loomground-governance", "contract:loomground-workspace", "contract:loomground-vertical", "contract:skill-governance-block", "contract:governance-layer", "contract:loomground-ref", "contract:a2a-compliance", "distribution:loomground-plugins", "distribution:loomground-patchbay", "distribution:loomground-mcp", "skill:loomground"],
   "prohibited_effects": ["host_dispatch", "policy_activation", "human_approval_substitution"],
   "handoff_to": ["evidence-grounder", "runtime-controller"],
   "may_dispatch": false

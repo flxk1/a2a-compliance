@@ -62,7 +62,7 @@ out: edit   decision=steer        dispatched=True  verb=issue-directive
 
 ## Family
 
-Runtime controls. `ComplianceTeam` assigns the 41 repositories to eight roles. Optional to both profiles; LOOMGROUND degrades an absent one to a human route. Consumed by [loomground-mcp](https://github.com/flxk1/loomground-mcp), serving `compliance-fleet`. Catalogue: [CATALOGUE.json](https://github.com/flxk1/loomground/blob/main/CATALOGUE.json).
+Runtime controls. `ComplianceTeam` assigns the 42 repositories to eight roles. Optional to both profiles; LOOMGROUND degrades an absent one to a human route. Consumed by [loomground-mcp](https://github.com/flxk1/loomground-mcp), serving `compliance-fleet`. Catalogue: [CATALOGUE.json](https://github.com/flxk1/loomground/blob/main/CATALOGUE.json).
 
 ## Status
 

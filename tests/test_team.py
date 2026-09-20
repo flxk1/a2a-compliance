@@ -49,11 +49,11 @@ def _satisfied():
     return GroundingResult([], None, ACTION_NO_STEER, "all checks satisfied")
 
 
-def test_manifest_assigns_all_41_public_repositories_once():
+def test_manifest_assigns_all_42_public_repositories_once():
     assigned = [repo for role in TEAM_ROLES for repo in role.repositories]
-    assert len(LOOMGROUND_REPOSITORIES) == 41
-    assert len(assigned) == 41
-    assert len(set(assigned)) == 41
+    assert len(LOOMGROUND_REPOSITORIES) == 42
+    assert len(assigned) == 42
+    assert len(set(assigned)) == 42
 
 
 def test_packaged_role_contracts_match_code_manifest_exactly():
