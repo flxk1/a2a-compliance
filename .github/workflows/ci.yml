@@ -6,6 +6,13 @@ on:
     branches-ignore:
       - 'release-please--**'
   pull_request:
+  # Manual trigger. Also the probe for why this repository records no workflow
+  # run at all: several pushes here, from more than one author, produced no
+  # `github-actions` check suite on the commit -- not a failing run, no run.
+  # If dispatch starts a run, the repository does receive events and the push
+  # delivery is what is broken; if it does not, Actions is not active here and
+  # the answer is a setting rather than a workflow.
+  workflow_dispatch:
 
 jobs:
   reuse:
