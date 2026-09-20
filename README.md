@@ -4,9 +4,7 @@
 
 **May a compliance team allow this maker action to take effect?**
 
-Plan a governed maker action across the Loomground family, then control
-the maker over an A2A protocol. Two profiles: a protocol floor and
-a fail-closed Loomground compliance team.
+Plan a governed maker action across the Loomground family, then control the maker over an A2A protocol. Two profiles: a protocol floor and a fail-closed Loomground compliance team.
 
 ## Problem
 
