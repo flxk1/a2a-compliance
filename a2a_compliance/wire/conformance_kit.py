@@ -71,9 +71,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
-from ..governance_block import GovernanceBlock
+from .. import envelope as env
+from ..authority import Roster
+from ..channel import ComplianceAgent
+from ..governance_block import GovernanceBlock, sign_governance_block
 from ..grounding import ACTION_NO_STEER, GroundingContext, GroundingResult
 from ..lifecycle import PREFLIGHT_TOOLS, TOOL_OWNERS
+from ..participant import ControlParticipant
 from ..team import COMPLIANCE_ROLES as TEAM_ROLES
 from ..team import CapabilityInventory, ComplianceTeam, ControlPlan, ControlRequest
 from . import canonical
@@ -90,9 +94,16 @@ from .certification import FreshnessPort, InMemoryFreshness, certify
 from .executor import ExecutionOutcome, ExecutorPort, bind_constraints, consume_and_execute
 from .obligations import issue_discharge_receipt
 from .reconciliation import ObservedEffects, reconcile
-from .signing import cnf_jkt_for_public_key, dev_sign_proof_of_possession, generate_dev_keypair
+from .signing import (
+    cnf_jkt_for_public_key,
+    dev_sign_proof_of_possession,
+    dev_sign_subject,
+    generate_dev_keypair,
+)
 from .trust import ANY, InMemoryRevocationStore, InMemoryTrustStore, RevocationStore, TrustStore
 from .verification import InMemoryNonceStore, NonceStore, verify
+from interfaces.a2a_control import Authority as ControlAuthority
+from interfaces.a2a_control import Party, Verb
 
 NORMAL_KIND = "conformance:normal"
 RESERVED_KIND = "conformance:reserved"
@@ -151,6 +162,17 @@ class ScenarioResult:
     name: str
     passed: bool
     detail: str
+    # Quick win 10 -- machine-readable OWASP Agentic AI Top 10 (2026) id this
+    # scenario's PASS evidences (ASI01-ASI10; see the one-line comment next
+    # to each scenario's own entry in `_NEGATIVE_SCENARIOS`/`_POSITIVE_ASI`
+    # for the why). Never inferred from the name string -- always carried
+    # explicitly from the scenario's own definition, so a caller (and
+    # `tests/test_conformance_asi_tags.py`) can check it without parsing
+    # prose. Defaults to `""` ONLY so a hand-built `ScenarioResult` in an
+    # existing test (predating this field) keeps constructing with its
+    # original 3 positional args; every `ScenarioResult` `run_conformance`
+    # itself produces always sets a real `ASIxx` id.
+    asi: str = ""
 
 
 @dataclass(frozen=True)
@@ -289,6 +311,32 @@ class _RecordingExecutor:
         return outcome
 
 
+class _InMemoryInbox:
+    """Quick win 10 -- a purely in-memory duck-typed stand-in for `inbox.
+    FileInbox`'s `put`/`poll` transport seam (the same seam `harness.py`'s
+    own `HarnessTransport` duck-types against instead of subclassing). Both
+    `ControlParticipant.checkpoint()` and `ComplianceAgent._send()`/
+    `.collect_replies()` call ONLY `.put()`/`.poll()` on their injected
+    inbox -- they never introspect its type -- so this satisfies the real
+    control-channel seam exactly while keeping the control-channel
+    scenarios below on the module's own no-host-effect invariant (never a
+    real file, unlike the file-backed inbox `tests/test_control_channel_
+    auth.py`/`tests/test_halt_approval.py` use for the same seam)."""
+
+    def __init__(self) -> None:
+        self._boxes: dict[str, list[dict]] = {}
+
+    def put(self, to_actor: str, msg_wire: dict) -> int:
+        box = self._boxes.setdefault(to_actor, [])
+        box.append(msg_wire)
+        return len(box) - 1
+
+    def poll(self, actor: str) -> list[dict]:
+        box = self._boxes.setdefault(actor, [])
+        pending, self._boxes[actor] = box, []
+        return pending
+
+
 def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> ConformancePorts:
     """TEST-ONLY. Builds a complete, self-contained `ConformancePorts` over
     ephemeral dev Ed25519 keys (`wire.signing.generate_dev_keypair`) and
@@ -414,6 +462,13 @@ def _approval(
 
 
 # --- the positive scenario: a complete governed run certifies --------------
+
+# ASI10 Rogue Agents -- the positive run's PASS is the baseline every other
+# scenario's rejection is contrasted against: it shows the ONLY way to reach
+# a certified effect is through the mediated pipeline itself, never a rogue
+# path around it.
+_POSITIVE_ASI = "ASI10"
+
 
 def _scenario_positive(ports: ConformancePorts, recorder: _RecordingExecutor, reference: datetime, far_future: datetime, run_id: str):
     plan = _build_plan(NORMAL_KIND)
@@ -920,6 +975,196 @@ def _scenario_missing_proof_rejected(ports, recorder, reference, far_future, run
     )
 
 
+# --- quick win 10 negative scenarios: the control-channel/governance/------
+# --- provenance seams (OWASP Agentic AI Top 10, 2026) ----------------------
+
+def _scenario_control_forged_sender_rejected(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- forged sender on the control channel. A `HOLD`
+    envelope signed by a key NEVER registered in the maker's `TrustStore`
+    (a forger who has no legitimate signing identity at all) must be
+    rejected and NEVER applied -- exactly the seam `tests/
+    test_control_channel_auth.py::test_forged_sender_not_applied_reported_
+    accepted_false` already exercises against `ControlParticipant.
+    checkpoint()` directly; this drives the identical seam in-process over
+    `_InMemoryInbox` so the module stays file-free."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    _legit_priv, legit_pub = generate_dev_keypair()
+    forger_priv, _forger_pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-comp-legit", legit_pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+    )
+    # key-forger is deliberately NEVER registered.
+    maker = ControlParticipant(
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, nonce_store=InMemoryNonceStore(),
+        state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.HOLD, body=env.hold_body("next-action"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    forged = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-forger",
+        sign=lambda d: dev_sign_subject(d, forger_priv), nonce=f"{run_id}:nonce",
+    )
+    maker.inbox.put(maker_id, forged)
+    responses = maker.checkpoint()
+    ok = (
+        len(responses) == 1 and responses[0].verb is Verb.ACK
+        and responses[0].body.get("accepted") is False and maker.is_held() is False
+    )
+    return ok, (
+        f"responses={[(r.verb.value, r.body.get('accepted')) for r in responses]}, "
+        f"held={maker.is_held()}"
+    )
+
+
+def _scenario_control_replayed_resume_rejected(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- replayed resume on the control channel. The identical
+    signed `RESUME` envelope (same sender, same nonce) delivered a second
+    time must be rejected on the second delivery -- the first delivery
+    still applies normally. Same seam as `tests/test_control_channel_auth.
+    py::test_replayed_nonce_rejected_on_second_delivery`."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add("key-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}))
+    maker = ControlParticipant(
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, nonce_store=InMemoryNonceStore(),
+        state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.RESUME, body=env.resume_body(f"{run_id}:hold"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    resume_wire = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-comp",
+        sign=lambda d: dev_sign_subject(d, priv), nonce=f"{run_id}:fixed-nonce",
+    )
+    maker.inbox.put(maker_id, resume_wire)
+    first = maker.checkpoint()
+    maker.inbox.put(maker_id, resume_wire)  # the identical envelope, delivered again
+    second = maker.checkpoint()
+    ok = (
+        len(first) == 1 and first[0].body.get("accepted") is True
+        and len(second) == 1 and second[0].body.get("accepted") is False
+        and "replay" in (second[0].body.get("note") or "")
+    )
+    return ok, (
+        f"first accepted={first[0].body.get('accepted')}, "
+        f"second accepted={second[0].body.get('accepted')}, note={second[0].body.get('note')!r}"
+    )
+
+
+def _scenario_control_unapproved_halt_not_dispatched(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- unapproved halt. `ComplianceAgent.halt()` in
+    AUTHENTICATED mode (a `TrustStore` configured) must never dispatch on
+    `confirm=True` alone or with no approval at all -- a reserved act is
+    surfaced to the human but NOT sent, exactly `tests/test_halt_approval.
+    py::test_no_receipt_not_dispatched`'s seam, driven here over the same
+    `ComplianceAgent.halt()` this kit's other scenarios never otherwise
+    touch."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    _priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add("key-approver", pub, frozenset({"HumanApprovalReceipt"}), frozenset())
+    comp = ComplianceAgent(
+        session_id=comp_actor, role="policy-compliance", inbox=_InMemoryInbox(),
+        roster=Roster(), trust_store=trust_store,
+    )
+    result = comp.halt(maker_id, reason_ref="conformance-quick-win-10")
+    ok = result.dispatched is False and result.surfaced_to_human is True
+    return ok, (
+        f"dispatched={result.dispatched}, surfaced_to_human={result.surfaced_to_human}, "
+        f"denied_reason={result.denied_reason!r}"
+    )
+
+
+def _scenario_tampered_governance_block_not_admitted(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- tampered governance block. A `SignedGovernanceBlock`
+    pins the ORIGINAL `GOVERNANCE` digest; `admit()` is then called against
+    a widened block (the prohibition silently dropped after signing) that
+    still hashes differently -- `admission._governance_block_findings`
+    (quick win 9) must catch the digest mismatch and refuse admission,
+    never trusting the block actually in force just because a signature
+    exists somewhere for a DIFFERENT block."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    policy_author_role = "policy-author"
+    author_priv, author_pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-policy-author"
+    # Registered under a run-scoped key_id -- never collides with the
+    # stage/permit/... bindings `dev_conformance_ports` already installed
+    # on this same shared `ports.trust_store`.
+    ports.trust_store.add(key_id, author_pub, frozenset({"GovernanceBlock"}), frozenset({policy_author_role}))
+    issuer = dev_issuer(key_id, f"policy:{run_id}-author", author_priv)
+    signed = sign_governance_block(GOVERNANCE, key_id=issuer.key_id, identity=issuer.identity, sign=issuer.sign)
+    tampered_governance = GovernanceBlock.from_dict({
+        "actions": [{"kind": NORMAL_KIND}],
+        "reserved": [{"kind": RESERVED_KIND, "by": "human"}],
+        "prohibited": [],  # attacker silently dropped the prohibition after signing
+    })
+    admission = admit(
+        plan, receipts, governance=tampered_governance, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, signed_governance_block=signed,
+        policy_author_role=policy_author_role, now=reference,
+    )
+    ok = (
+        admission.decision is not AdmissionDecision.ADMITTED
+        and admission.governance_block_digest is None
+        and any("does not match the pinned, signed digest" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_self_report_never_satisfies_admission(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- injection-provenance. `envelope.report_state_body` is
+    the ONE existing provenance notion this package already has (SPEC
+    §3.3): a maker's own account, ALWAYS stamped `provenance:'self-report'`,
+    NEVER promoted to witnessed/observed evidence. This asserts both halves
+    of that guarantee: (a) the stamp itself never drifts off
+    `'self-report'`, and (b) even when that exact self-report body is
+    smuggled into `admit()`'s stage-receipt list in place of a required
+    preflight `StageReceipt`, `wire.verify` rejects it outright (it has
+    neither the `StageReceipt` schema shape nor a trust-store-resolvable
+    signature it could forge without a trusted key) and admission is never
+    granted on its strength -- a maker's self-report can never satisfy an
+    admission receipt."""
+    self_report = env.report_state_body(claims=[{"claim": "conformance-injection-provenance"}])
+    if self_report.get("provenance") != "self-report":
+        return False, f"self-report body drifted off provenance='self-report': {self_report!r}"
+
+    plan = _build_plan(NORMAL_KIND)
+    legitimate = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    dropped_capability = f"tool:{PREFLIGHT_TOOLS[0]}"
+    forged_as_receipt = dict(self_report)
+    forged_as_receipt.update({
+        "run_id": run_id, "nonce": f"{run_id}:stage:forged-self-report",
+        "action_digest": plan.action_digest, "capability": dropped_capability,
+    })
+    tainted = [r for r in legitimate if r["capability"] != dropped_capability]
+    tainted.append(forged_as_receipt)  # the self-report smuggled in place of the missing receipt
+
+    admission = admit(
+        plan, tainted, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, now=reference,
+    )
+    ok = (
+        admission.decision is not AdmissionDecision.ADMITTED
+        and forged_as_receipt.get("provenance") == "self-report"
+    )
+    return ok, (
+        f"decision={admission.decision.value}, reasons={admission.reasons}, "
+        f"forged.provenance={forged_as_receipt.get('provenance')!r}"
+    )
+
+
 # Scenarios whose PASS jointly evidences "bypass is tested and rejected"
 # (plan: 'Outcome' -- the mediated grade). Admission-only vectors (prohibited/
 # reserved/ready-alone/non-admitted-permit) and certification-honesty vectors
@@ -951,21 +1196,91 @@ def _mediation_verified(scenarios: tuple[ScenarioResult, ...]) -> bool:
     )
 
 
-_NEGATIVE_SCENARIOS: tuple[tuple[str, Callable], ...] = (
-    ("prohibited_action_never_admits", _scenario_prohibited_never_admits),
-    ("reserved_without_approval_never_admits", _scenario_reserved_without_approval_never_admits),
-    ("ready_alone_never_admits", _scenario_ready_alone_never_admits),
-    ("non_admitted_permit_never_issued", _scenario_non_admitted_permit_never_issued),
-    ("bypass_missing_permit_rejected", _scenario_bypass_missing_permit),
-    ("bypass_tampered_permit_rejected", _scenario_bypass_tampered_permit),
-    ("reuse_nonce_replay_rejected", _scenario_reuse_nonce_replay),
-    ("drift_expired_permit_rejected", _scenario_drift_expired_permit),
-    ("drift_revoked_run_rejected", _scenario_drift_revoked_run),
-    ("argument_mutation_rejected", _scenario_argument_mutation),
-    ("mismatched_observed_effects_not_certified", _scenario_mismatched_observed_effects),
-    ("fabricated_discharge_not_certified", _scenario_fabricated_discharge),
-    ("foreign_executor_rejected", _scenario_foreign_executor_rejected),
-    ("missing_proof_rejected", _scenario_missing_proof_rejected),
+# Quick win 10 -- every entry now also carries a machine-readable OWASP
+# Agentic AI Top 10 (2026) id (`ASI01`-`ASI10`), one-line-justified inline,
+# for the specific attack/failure class THIS scenario's PASS evidences was
+# rejected/refused. `tests/test_conformance_asi_tags.py` asserts every
+# entry (and the positive scenario, see `_POSITIVE_ASI` above run_
+# conformance) carries a valid id.
+_NEGATIVE_SCENARIOS: tuple[tuple[str, Callable, str], ...] = (
+    # ASI01 Agent Goal Hijack -- a prohibited kind must never be admitted by
+    # smuggling a valid approval past a REFUSE ruling; that is exactly a
+    # goal-hijack attempt against the declared governance boundary.
+    ("prohibited_action_never_admits", _scenario_prohibited_never_admits, "ASI01"),
+    # ASI03 Identity and Privilege Abuse -- a reserved (higher-privilege)
+    # kind must stay unadmitted without a genuine approval; admitting it
+    # anyway would be an unearned privilege escalation.
+    ("reserved_without_approval_never_admits", _scenario_reserved_without_approval_never_admits, "ASI03"),
+    # ASI10 Rogue Agents -- a plan's own self-declared `ready` flag must
+    # never stand in for governance's own ADMITTED ruling; a plan cannot be
+    # allowed to certify its own readiness as authorization.
+    ("ready_alone_never_admits", _scenario_ready_alone_never_admits, "ASI10"),
+    # ASI02 Tool Misuse -- no `ExecutionPermit` (the only thing that lets a
+    # tool run at all) may ever be issued off a non-ADMITTED decision.
+    ("non_admitted_permit_never_issued", _scenario_non_admitted_permit_never_issued, "ASI02"),
+    # ASI05 Unexpected Code Execution -- dispatching a tool with NO permit
+    # at all is the paradigmatic unauthorized-execution case; it must never
+    # reach the executor.
+    ("bypass_missing_permit_rejected", _scenario_bypass_missing_permit, "ASI05"),
+    # ASI04 Agentic Supply Chain -- a permit mutated after issuance (its
+    # signature now stale) is a tampered signed artifact; supply-chain
+    # integrity of the authorization itself must hold.
+    ("bypass_tampered_permit_rejected", _scenario_bypass_tampered_permit, "ASI04"),
+    # ASI07 Insecure Inter-Agent Communication -- replaying a
+    # once-consumed permit is a message-replay attack against the
+    # executor's own inbound channel.
+    ("reuse_nonce_replay_rejected", _scenario_reuse_nonce_replay, "ASI07"),
+    # ASI08 Cascading Failures -- an expired permit consumed late is a
+    # time-drift failure mode that must fail closed rather than cascade a
+    # stale authorization into a live effect.
+    ("drift_expired_permit_rejected", _scenario_drift_expired_permit, "ASI08"),
+    # ASI03 Identity and Privilege Abuse -- a revoked run must lose its
+    # standing privilege immediately; a permit issued under it must not
+    # keep working past revocation.
+    ("drift_revoked_run_rejected", _scenario_drift_revoked_run, "ASI03"),
+    # ASI02 Tool Misuse -- dispatching a governed tool with arguments other
+    # than the ones actually bound into the permit is exactly a misuse of
+    # that tool call.
+    ("argument_mutation_rejected", _scenario_argument_mutation, "ASI02"),
+    # ASI06 Memory and Context Poisoning -- a tool's own self-reported
+    # success must never be trusted uncritically; independently observed
+    # effects that disagree must poison nothing downstream (no
+    # certification).
+    ("mismatched_observed_effects_not_certified", _scenario_mismatched_observed_effects, "ASI06"),
+    # ASI09 Human-Agent Trust Exploitation -- fabricating an unsigned
+    # obligation-discharge receipt is exploiting the certifier's trust in a
+    # compliance artifact to claim a duty was satisfied when it was not.
+    ("fabricated_discharge_not_certified", _scenario_fabricated_discharge, "ASI09"),
+    # ASI03 Identity and Privilege Abuse -- a permit sender-constrained to
+    # one executor identity presented by a DIFFERENT one is an identity
+    # substitution attack.
+    ("foreign_executor_rejected", _scenario_foreign_executor_rejected, "ASI03"),
+    # ASI07 Insecure Inter-Agent Communication -- the right identity with
+    # NO proof of possession at all is an unauthenticated inter-agent
+    # message; the channel itself must demand the proof, not just the
+    # claimed identity.
+    ("missing_proof_rejected", _scenario_missing_proof_rejected, "ASI07"),
+    # ASI07 Insecure Inter-Agent Communication -- a control-channel envelope
+    # signed by a key with no trust-store standing at all (a forger with no
+    # legitimate identity) must never be applied.
+    ("control_forged_sender_rejected", _scenario_control_forged_sender_rejected, "ASI07"),
+    # ASI07 Insecure Inter-Agent Communication -- the identical signed
+    # control envelope delivered twice is a replay against the control
+    # channel itself, distinct from the permit-replay vector above.
+    ("control_replayed_resume_rejected", _scenario_control_replayed_resume_rejected, "ASI07"),
+    # ASI09 Human-Agent Trust Exploitation -- dispatching a reserved halt
+    # without a verified, distinct human's approval would exploit the
+    # human-in-the-loop trust boundary the reserved-act gate exists to
+    # protect.
+    ("control_unapproved_halt_not_dispatched", _scenario_control_unapproved_halt_not_dispatched, "ASI09"),
+    # ASI04 Agentic Supply Chain -- a governance/policy artifact widened
+    # after it was signed is a tampered supply-chain input to the
+    # admission decision itself.
+    ("tampered_governance_block_not_admitted", _scenario_tampered_governance_block_not_admitted, "ASI04"),
+    # ASI06 Memory and Context Poisoning -- an unverified maker self-report,
+    # if it could satisfy an admission receipt, would poison the
+    # governance decision with attacker-influenced, unwitnessed content.
+    ("self_report_never_satisfies_admission", _scenario_self_report_never_satisfies_admission, "ASI06"),
 )
 
 
@@ -990,15 +1305,15 @@ def run_conformance(ports: ConformancePorts, *, now: Optional[datetime] = None) 
         )
     except Exception as exc:  # noqa: BLE001 -- fail-closed reporting, never a crash
         ok, detail, certificate = False, f"raised {exc!r}", None
-    scenarios.append(ScenarioResult("positive_full_run_certifies", ok, detail))
+    scenarios.append(ScenarioResult("positive_full_run_certifies", ok, detail, _POSITIVE_ASI))
 
-    for name, scenario in _NEGATIVE_SCENARIOS:
+    for name, scenario, asi in _NEGATIVE_SCENARIOS:
         run_id = f"conformance-{token}-{name}"
         try:
             ok, detail = scenario(ports, recorder, reference, far_future, run_id)
         except Exception as exc:  # noqa: BLE001 -- fail-closed reporting, never a crash
             ok, detail = False, f"raised {exc!r}"
-        scenarios.append(ScenarioResult(name, ok, detail))
+        scenarios.append(ScenarioResult(name, ok, detail, asi))
 
     bypass_rejected = _mediation_verified(tuple(scenarios))
     return ConformanceReport(tuple(scenarios), bypass_rejected, certificate)
