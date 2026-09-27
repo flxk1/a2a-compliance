@@ -82,6 +82,11 @@ jobs:
           fetch-depth: 0
       - name: commit discipline (new commits only)
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # A manual run carries no pushed commits; the push or PR run that
+            # introduced each commit already checked it.
+            echo "workflow_dispatch: no new commits to check"; exit 0
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch -q origin ${{ github.base_ref }}
             range="origin/${{ github.base_ref }}..HEAD"
