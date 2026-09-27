@@ -12,8 +12,8 @@ treats it as a failure (SPEC §3.1).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 
 from interfaces.a2a_control import (
     Verb,
@@ -27,6 +27,7 @@ from interfaces.a2a_control import (
 )
 
 PROTOCOL = "a2a-compliance/0.1"
+DEFAULT_TTL_SECONDS = 300
 
 
 def _now() -> str:
@@ -180,8 +181,11 @@ def _enforcement_wire(e: Optional[Enforcement]) -> Optional[dict]:
 
 def to_wire(m: Message) -> dict:
     """Serialize a Message to the schema's on-wire dict. `grounding` and
-    `enforcement` serialize to JSON null when absent."""
-    return {
+    `enforcement` serialize to JSON null when absent. `nonce`/`expires_at`/
+    `key_id`/`signature` are omitted (never emitted as null) when the message
+    was never stamped for the authenticated channel -- an unsigned envelope
+    stays byte-for-byte the bare-mode shape."""
+    wire: dict = {
         "protocol": m.protocol,
         "id": m.id,
         "correlates": m.correlates,
@@ -194,6 +198,15 @@ def to_wire(m: Message) -> dict:
         "grounding": _grounding_wire(m.grounding),
         "enforcement": _enforcement_wire(m.enforcement),
     }
+    if m.nonce is not None:
+        wire["nonce"] = m.nonce
+    if m.expires_at is not None:
+        wire["expires_at"] = m.expires_at
+    if m.key_id is not None:
+        wire["key_id"] = m.key_id
+    if m.signature is not None:
+        wire["signature"] = m.signature
+    return wire
 
 
 def _grounding_from_wire(d: Optional[dict]) -> Optional[Grounding]:
@@ -246,4 +259,70 @@ def from_wire(d: dict) -> Message:
         correlates=d.get("correlates"),
         grounding=_grounding_from_wire(d.get("grounding")),
         enforcement=_enforcement_from_wire(d.get("enforcement")),
+        nonce=d.get("nonce"),
+        expires_at=d.get("expires_at"),
+        key_id=d.get("key_id"),
+        signature=d.get("signature"),
     )
+
+
+# --- authenticated-channel helpers (OWASP ASI07 hardening) ----------------
+#
+# Signing/verification themselves are NEVER duplicated here: signing goes
+# through `wire.signing` (Ed25519 over the RFC 8785 canonical/PAE bytes),
+# imported lazily below so the bare/module-import path never requires
+# `cryptography`. This module only stamps the nonce/expiry an authenticated
+# sender needs and hands the exact bytes to an injected signer.
+
+def new_nonce() -> str:
+    """A fresh single-use token for one outbound envelope."""
+    return uuid.uuid4().hex
+
+
+def stamp_and_sign(
+    wire: dict,
+    *,
+    key_id: str,
+    sign: Callable[[dict], str],
+    ttl_seconds: int = DEFAULT_TTL_SECONDS,
+    nonce: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> dict:
+    """Return a COPY of `wire` stamped with `nonce`/`expires_at`/`key_id` and
+    signed by the injected `sign` callable (an `Issuer`-style signer; this
+    package itself never holds or fabricates a production key -- see
+    `wire/admission.py`'s `Issuer`/`dev_issuer` for the same pattern).
+
+    `sign` receives the envelope dict with `nonce`/`expires_at`/`key_id`
+    already set and must return the base64 Ed25519 signature over its DSSE
+    PAE (`wire.signing.pae_bytes`/`dev_sign_subject` do this); the signature
+    itself is computed over the canonical *subject* (signature/subject_digest
+    excluded), so binding a `nonce`/`expires_at` here into the signed dict
+    ties them into what gets signed -- a tampered nonce or expiry invalidates
+    the signature, it cannot be swapped in afterwards."""
+    reference = now if now is not None else datetime.now(timezone.utc)
+    signed = dict(wire)
+    signed["nonce"] = nonce if nonce is not None else new_nonce()
+    signed["expires_at"] = (reference + timedelta(seconds=ttl_seconds)).isoformat()
+    signed["key_id"] = key_id
+    signed.pop("signature", None)
+    signed["signature"] = sign(signed)
+    return signed
+
+
+def halt_digest(compliance_actor: str, maker: str, reason_ref: Optional[str] = None) -> str:
+    """The digest a `HumanApprovalReceipt.permitted_action_digest` must bind
+    to in order to approve one exact halt: RFC 8785 canonical digest over the
+    halt's identifying fields (never the whole envelope, so a fresh envelope
+    id/timestamp/nonce per halt attempt still binds to the same approval).
+    Reuses `wire.canonical` (read-only) -- no digest scheme is reinvented
+    here."""
+    from .wire import canonical
+
+    subject = {
+        "verb": Verb.HALT.value,
+        "from": compliance_actor,
+        "to": maker,
+        "reason_ref": reason_ref,
+    }
+    return canonical.digest_hex(subject)

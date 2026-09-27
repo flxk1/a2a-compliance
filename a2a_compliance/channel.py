@@ -9,18 +9,44 @@ provider is imported on this path.
 
 Reserved acts (`halt`; and any reserved kind in a maker's block) are surfaced to
 the human and NOT auto-dispatched — in every mode, regardless of enrichment.
+
+--- Authenticated control channel + gated halt (OWASP ASI07; AI Act Art. 14(4)) --
+
+AUTHENTICATED mode is entered by configuring `trust_store` on this agent (the
+same TrustStore a `ControlParticipant` verifies against). In that mode:
+
+- every outbound envelope is signed via an injected `signer` (an
+  `Issuer`-shaped object: `key_id`/`identity`/`sign`, the same shape
+  `wire/admission.py` already uses — this package never embeds or fabricates a
+  production key; `wire.admission.dev_issuer` is the TEST-ONLY convenience);
+  signing itself goes through `wire/signing.py` exclusively.
+- `halt()` additionally requires a verified `HumanApprovalReceipt` bound to
+  this exact halt (via `envelope.halt_digest`) and approved by a human
+  identity distinct from the sender. `confirm=True` alone NEVER dispatches a
+  halt in this mode — it is meaningless without a receipt.
+
+In BARE mode (`trust_store` is None, the Phase-1 default) outbound envelopes
+stay unsigned and `halt()` keeps the original advisory `confirm=True` human
+gate — documented here as advisory-only, never mistaken for a cryptographic
+approval.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 
 from interfaces.a2a_control import Verb, Party, Message, Grounding
 from . import envelope as env
 from .inbox import FileInbox
-from .authority import Roster, Authorization, authorize
+from .authority import HUMAN_ROLE, Roster, Authorization, authorize
 from .governance_block import GovernanceBlock, SteerRuling, SteerDecision
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
+    from .wire.admission import Issuer
+    from .wire.trust import RevocationStore, TrustStore
+    from .wire.verification import NonceStore
 
 
 @dataclass
@@ -51,6 +77,10 @@ class ComplianceAgent:
     inbox: FileInbox
     roster: Optional[Roster] = None
     maker_blocks: Optional[dict[str, GovernanceBlock]] = None
+    trust_store: Optional["TrustStore"] = None
+    revocation_store: Optional["RevocationStore"] = None
+    nonce_store: Optional["NonceStore"] = None
+    signer: Optional["Issuer"] = None
 
     def _me(self) -> Party:
         return Party(actor=self.session_id, role=self.role)
@@ -66,8 +96,18 @@ class ComplianceAgent:
     def _block_for(self, maker: str) -> Optional[GovernanceBlock]:
         return (self.maker_blocks or {}).get(maker)
 
+    @property
+    def authenticated_mode(self) -> bool:
+        """True when a `TrustStore` is configured — AUTHENTICATED mode."""
+        return self.trust_store is not None
+
     def _send(self, msg: Message) -> Message:
-        self.inbox.put(msg.to.actor, env.to_wire(msg))
+        wire = env.to_wire(msg)
+        if self.authenticated_mode and self.signer is not None:
+            wire = env.stamp_and_sign(
+                wire, key_id=self.signer.key_id, sign=self.signer.sign,
+            )
+        self.inbox.put(msg.to.actor, wire)
         return msg
 
     # --- verbs ---------------------------------------------------------------
@@ -167,17 +207,43 @@ class ComplianceAgent:
         *,
         reason_ref: Optional[str] = None,
         confirm: bool = False,
+        approval: Optional[dict] = None,
         grounding: Optional[Grounding] = None,
+        now: Optional[datetime] = None,
     ) -> DispatchResult:
         """Reserved act (§3.2, §5.1): halt is surfaced to the human before
-        dispatch in EVERY mode. Without `confirm=True` (the human's approval) it
-        is surfaced and NOT dispatched. External enforcement, when present (Phase 3), would gate
-        it additionally; its absence does not lower this bar."""
+        dispatch in EVERY mode. External enforcement, when present (Phase 3),
+        would gate it additionally; its absence does not lower this bar.
+
+        AUTHENTICATED mode (`trust_store` configured): `confirm=True` alone
+        NEVER dispatches. `approval` must be a `HumanApprovalReceipt` (wire
+        dict) that (a) VERIFIES via `wire.verification.verify` against this
+        agent's `trust_store`/`revocation_store`/`nonce_store` — reused
+        read-only, never reimplemented; (b) is bound to this exact halt via
+        `permitted_action_digest == envelope.halt_digest(...)`, so a receipt
+        approving a different halt (or a different maker) can never be
+        replayed onto this one; and (c) carries an `approver` whose role is
+        `authority.HUMAN_ROLE` and whose id differs from this agent's own
+        `session_id` and from `maker` — an approver cannot be the sender, and
+        cannot be the maker being halted. Any failure surfaces to the human
+        and does NOT dispatch.
+
+        BARE mode (no `trust_store`): the original advisory gate — `confirm
+        =True` (the human's approval, asserted out of band) dispatches; there
+        is no cryptographic binding here, which is exactly why AUTHENTICATED
+        mode exists."""
         auth = self._authorize(Verb.HALT, maker)
         if not auth.allowed:
             return DispatchResult(False, auth, denied_reason=auth.reason)
 
-        if not confirm:
+        if self.authenticated_mode:
+            digest = env.halt_digest(self.session_id, maker, reason_ref)
+            reason = self._verify_halt_approval(approval, digest, maker, now=now)
+            if reason is not None:
+                return DispatchResult(
+                    False, auth, surfaced_to_human=True, denied_reason=reason,
+                )
+        elif not confirm:
             return DispatchResult(
                 False, auth, surfaced_to_human=True,
                 denied_reason="halt is a reserved act — surfaced to the human; "
@@ -193,6 +259,46 @@ class ComplianceAgent:
             grounding=grounding,
         )
         return DispatchResult(True, auth, message=self._send(msg), surfaced_to_human=True)
+
+    def _verify_halt_approval(
+        self, approval: Optional[dict], digest: str, maker: str, *, now: Optional[datetime],
+    ) -> Optional[str]:
+        """Returns None when `approval` is a verified, digest-bound receipt
+        from a distinct authorized human; otherwise the denial reason.
+        AUTHENTICATED-mode-only helper — reuses the public `wire.verification.
+        verify` (E1) read-only rather than reimplementing signature/expiry/
+        replay/trust checks."""
+        if approval is None:
+            return (
+                "halt requires a verified HumanApprovalReceipt in authenticated "
+                "mode; confirm=True alone does not dispatch"
+            )
+
+        from .wire.verification import verify  # local: needs jsonschema/cryptography
+
+        result = verify(
+            approval, "HumanApprovalReceipt",
+            trust_store=self.trust_store, revocation_store=self.revocation_store,
+            nonce_store=self.nonce_store, now=now,
+        )
+        if not result.ok:
+            return "halt approval receipt failed verification: " + "; ".join(result.errors)
+
+        if approval.get("permitted_action_digest") != digest:
+            return "halt approval is not bound to this halt's digest"
+
+        approver = approval.get("approver") or {}
+        approver_id = approver.get("id")
+        approver_role = approver.get("role")
+        if approver_role != HUMAN_ROLE:
+            return (
+                f"halt approver role {approver_role!r} is not an authorized "
+                f"human identity (must be {HUMAN_ROLE!r})"
+            )
+        if not approver_id or approver_id in (self.session_id, maker):
+            return "halt approver must be a human identity distinct from the sender/maker"
+
+        return None
 
     def collect_replies(self) -> list[Message]:
         """Drain this compliance agent's own mailbox (acks / report-state /

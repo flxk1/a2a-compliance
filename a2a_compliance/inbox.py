@@ -33,26 +33,39 @@ class FileInbox:
         return box
 
     def _next_seq(self, box: Path) -> int:
-        """Allocate a strictly increasing sequence number via O_EXCL claim."""
+        """Allocate a strictly increasing sequence number via O_EXCL claim.
+        Claim files are mailbox contents too (Security: control messages may
+        carry sensitive directive/state payloads) -- created 0600, same as
+        every other file this class writes."""
         n = 0
         while True:
             claim = box / f".seq.{n:012d}"
             try:
-                fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                 os.close(fd)
                 return n
             except FileExistsError:
                 n += 1
 
     def put(self, to_actor: str, msg_wire: dict) -> int:
-        """Append a message (on-wire dict) to `to_actor`'s mailbox. Returns seq."""
+        """Append a message (on-wire dict) to `to_actor`'s mailbox. Returns seq.
+        Both the temp file and its published name are created 0600 -- a
+        mailbox may carry another actor's control state, so it is never
+        group/other readable, including in the brief tmp-file window before
+        the atomic rename."""
         box = self._mailbox(to_actor)
         seq = self._next_seq(box)
         payload = json.dumps(msg_wire, ensure_ascii=False, indent=2)
         tmp = box / f".tmp-{seq:012d}.json"
         final = box / f"{seq:012d}-{msg_wire.get('id', 'msg')}.json"
-        tmp.write_text(payload, encoding="utf-8")
-        os.replace(tmp, final)  # atomic publish
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        os.replace(tmp, final)  # atomic publish; os.replace preserves tmp's mode
         return seq
 
     def _cursor_path(self, box: Path) -> Path:

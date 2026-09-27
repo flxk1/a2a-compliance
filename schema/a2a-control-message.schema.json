@@ -28,6 +28,26 @@
     "enforcement": {
       "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/enforcement" } ],
       "description": "null unless external enforcement is present"
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 1,
+      "description": "AUTHENTICATED-mode only (OWASP ASI07): single-use per (from.actor, nonce); absent in BARE/ADVISORY mode (no trust store configured). A receiver in authenticated mode rejects a replayed (sender, nonce) pair."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "AUTHENTICATED-mode only: the envelope's expiry; a receiver in authenticated mode rejects an envelope at/after this time. Absent in BARE/ADVISORY mode."
+    },
+    "key_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "AUTHENTICATED-mode only: identifies the signing key, resolved to a trust root by an injected TrustStore (wire/trust.py), never from this payload. Absent in BARE/ADVISORY mode."
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1,
+      "description": "AUTHENTICATED-mode only: base64 Ed25519 signature over the DSSE Pre-Authentication Encoding of this envelope's RFC 8785 canonical subject (see wire/signing.py); verified only when a TrustStore is supplied. Absent in BARE/ADVISORY mode."
     }
   },
   "$defs": {
