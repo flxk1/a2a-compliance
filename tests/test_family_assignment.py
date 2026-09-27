@@ -2,12 +2,22 @@
 team's role assignment and the packaged role manifests.
 
 No network access: `a2a_compliance.family.FAMILY_REPOSITORIES` is a plain,
-committed data module (see its docstring for the `gh`/catalogue commands used
-to regenerate it), not fetched here.
+committed data module (see its docstring for the `gh` command used to
+regenerate it), not fetched here. Nothing in this module imports subprocess,
+requests or urllib, or calls `gh`.
 """
 
-from a2a_compliance.family import FAMILY_REPOSITORIES
+import json
+from pathlib import Path
+
+from a2a_compliance.family import (
+    ARCHIVED_PUBLIC_REPOSITORIES,
+    EXCLUDED_PUBLIC_REPOSITORIES,
+    FAMILY_REPOSITORIES,
+)
 from a2a_compliance.team import COMPLIANCE_ROLES, role_manifests
+
+FAMILY_JSON_PATH = Path(__file__).resolve().parent.parent / "a2a_compliance" / "family.json"
 
 
 def _assignment_counts() -> dict[str, int]:
@@ -35,16 +45,38 @@ def test_compliance_roles_names_no_repo_outside_the_family_list():
 
 def test_family_list_has_no_duplicates_and_matches_expected_size():
     assert len(FAMILY_REPOSITORIES) == len(set(FAMILY_REPOSITORIES))
-    assert len(FAMILY_REPOSITORIES) == 43
+    assert len(FAMILY_REPOSITORIES) == 42
 
 
-def test_loomground_composition_is_assigned_to_conductor():
-    # The one repo this fix adds: dropped from the upstream catalogue because
-    # it is deprecated/archived, but still a published family artifact (see
-    # a2a_compliance/family.py docstring). Pin its placement explicitly so a
-    # future edit that silently moves or drops it is caught here too.
-    conductor = next(role for role in COMPLIANCE_ROLES if role.id == "conductor")
-    assert "loomground-composition" in conductor.repositories
+def test_family_list_excludes_dot_github():
+    assert ".github" not in FAMILY_REPOSITORIES
+    assert ".github" in EXCLUDED_PUBLIC_REPOSITORIES
+
+
+def test_family_list_contains_no_archived_repo():
+    archived = set(ARCHIVED_PUBLIC_REPOSITORIES)
+    assert archived, "expected at least one recorded archived repo to guard against"
+    overlap = archived & set(FAMILY_REPOSITORIES)
+    assert overlap == set(), f"archived repos must not appear in the family list: {sorted(overlap)}"
+
+
+def test_loomground_composition_is_archived_and_not_assigned():
+    # loomground-composition was archived 2026-09-16 and must not be a family
+    # member or own a role. This pins the correction so a future edit that
+    # silently re-adds it (to the family list or to a role) is caught here.
+    assert "loomground-composition" not in FAMILY_REPOSITORIES
+    assert "loomground-composition" in ARCHIVED_PUBLIC_REPOSITORIES
+    counts = _assignment_counts()
+    assert counts.get("loomground-composition", 0) == 0, (
+        "loomground-composition is archived and must not be assigned to any role"
+    )
+
+
+def test_family_py_and_family_json_agree():
+    data = json.loads(FAMILY_JSON_PATH.read_text(encoding="utf-8"))
+    assert tuple(data["family"]) == FAMILY_REPOSITORIES
+    assert set(data["_excluded_public_repos"]) == set(EXCLUDED_PUBLIC_REPOSITORIES)
+    assert set(data["_archived_public_repos"]) == set(ARCHIVED_PUBLIC_REPOSITORIES)
 
 
 def test_team_py_and_role_json_allowed_capabilities_agree_for_family_repos():

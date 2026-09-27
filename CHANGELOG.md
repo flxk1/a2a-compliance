@@ -6,6 +6,27 @@
 
 ### Fixed
 
+Family definition corrected to a fresh `gh` query. The family list was
+previously derived by cross-checking `loomground`'s `CATALOGUE.json` and then
+manually re-adding one archived repository whose own README still claimed
+membership. It is now defined mechanically instead: every public,
+non-archived repository on the `flxk1` GitHub account, minus `.github`,
+verified by `gh repo list flxk1 --visibility public --limit 300 --json
+name,isArchived` (run 2026-09-27). Re-running that query against the current
+family list reproduces it exactly: 44 public repositories, 1 archived
+(`loomground-composition`) and 1 account meta-repo (`.github`) excluded,
+leaving 42. `loomground-composition`'s prior `conductor`-role assignment in
+`COMPLIANCE_ROLES` and `roles/conductor.json` is removed: an archived
+repository is not a family member and must not hold a role.
+`a2a_compliance/family.py` and `family.json` now carry the exact command and
+date instead of the old catalogue-based rationale, and record the excluded
+and archived repositories with reasons.
+`tests/test_family_assignment.py` gained offline checks (no `gh`, no network)
+that the family list contains no archived repository and not `.github`, that
+`family.py` and `family.json` agree, and that `loomground-composition`
+specifically stays unassigned. README.md, llms.txt, `docs/compliance-team.md`
+and the entry below are updated to the resulting count.
+
 Halt approval ordering. A replayed halt receipt is refused as already used; a second, independently valid `next-action` receipt for the same run is refused by the scope rule before its nonce is spent; the receipt's nonce is consumed only after every other check passes. `session` scope may authorise more than one halt in the run.
 
 ### Added
@@ -172,15 +193,24 @@ public signature changed.
 
 ### Fixed
 
-The compliance manifest omitted `loomground-composition`, a published family
-repository. It is now assigned to `conductor` as an optional contract, and the
-manifest assigns all 43 public family repositories exactly once.
-`a2a_compliance/family.py`, mirrored in `family.json`, records the family list
-the assignment is checked against, and `tests/test_family_assignment.py` fails
-on a family repository left unassigned or assigned twice. README.md, llms.txt
-and `docs/compliance-team.md` had stated three different repository counts;
-each now states 43, and `tests/test_readme_claims.py` derives the count from
-`COMPLIANCE_ROLES` and holds all three documents to it.
+The compliance manifest's family list lacked a single, precisely stated
+definition. `a2a_compliance/family.py`, mirrored in `family.json`, now records
+the family list the assignment is checked against, and
+`tests/test_family_assignment.py` fails on a family repository left unassigned
+or assigned twice. README.md, llms.txt and `docs/compliance-team.md` had
+stated three different repository counts; each now states the same number,
+and `tests/test_readme_claims.py` derives it from `COMPLIANCE_ROLES` and holds
+all three documents to it.
+
+An earlier pass in this same unreleased series had assigned
+`loomground-composition` to `conductor` as an optional contract because its
+own README still claimed family membership. That repository was archived
+2026-09-16, so it is not a member of the family as now defined (every public,
+non-archived `flxk1` repository, minus `.github`); the assignment is removed
+here, before release, so no released version ever names it. The family
+definition itself is now pinned to a single re-runnable `gh` query rather
+than a hand-resolved catalogue cross-check -- see "Family definition
+corrected to a fresh `gh` query" below.
 
 The plain `wire.verification.verify` call for a `HumanApprovalReceipt` did not
 itself check the signing key's bound role/identity against the receipt's

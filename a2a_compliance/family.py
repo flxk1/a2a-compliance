@@ -7,37 +7,35 @@ tests.
 
 Regeneration
 ------------
-This list is derived by cross-checking every public `flxk1` repository
-against the family catalogue, then resolving the (rare) disagreement by
-reading the repository itself:
+The family is defined as: every public, non-archived repository on the
+`flxk1` GitHub account, minus `.github` (account metadata, not a
+Loomground-family artifact).  An archived repository is never a member, even
+if it was one before archival.
 
-    gh repo list flxk1 --visibility public --limit 200 --json name,description
-    gh api repos/flxk1/loomground/contents/CATALOGUE.json \
-        -H "Accept: application/vnd.github.raw" > CATALOGUE.json
+Regenerate/verify with:
 
-A public repo is a family member if it appears in `CATALOGUE.json`'s
-`repos` list.  As of this snapshot there is exactly one exception:
+    gh repo list flxk1 --visibility public --limit 300 --json name,isArchived
 
-  * `loomground-composition` -- deprecated and archived (2026-09-16),
-    superseded by this repository's own 8-role compliance team and A2A
-    lifecycle.  Because it is deprecated it was *dropped* from
-    CATALOGUE.json, but it is still a published Loomground-family artifact
-    (its own README states "Family: Composition"), so it is included here
-    and assigned a role (`conductor`, `required=False`) rather than
-    silently dropped.  This is a judgment call, not a mechanical one --
-    flag it for human re-confirmation if CATALOGUE.json's editorial policy
-    on deprecated repos changes.
+Snapshot taken 2026-09-27 against that command's output. It listed 44 public
+repositories, of which 1 was archived (`loomground-composition`, archived
+2026-09-16, superseded by this repository's own 8-role compliance team and
+A2A lifecycle) and 1 is the account meta-repo (`.github`), leaving 42 family
+repositories.
 
 Excluded public repos, with reason:
 
   * `.github` -- account-level meta-repo (default community health files
-    for the flxk1 GitHub account). Not in CATALOGUE.json and not a
-    Loomground-family artifact; it ships no Loomground role, tool, skill
-    or contract.
+    for the flxk1 GitHub account). Not a Loomground-family artifact; it
+    ships no Loomground role, tool, skill or contract.
 
-Snapshot taken 2026-09-27 against CATALOGUE.json
-(sha e5ac0a6034bd75bcee0eeb698cd529728121da4d, 42 cataloged repos) plus the
-one manually-confirmed addition above, for 43 total family repos.
+Archived public repos, with reason (excluded from the family; recorded here
+only so tests can assert they stay excluded, not because they count toward
+the family):
+
+  * `loomground-composition` -- archived 2026-09-16. Its prior `conductor`
+    role assignment in `team.py`/`roles/conductor.json` was removed in this
+    correction: an archived repository is not a family member and must not
+    be assigned a role.
 """
 
 from __future__ import annotations
@@ -54,7 +52,6 @@ FAMILY_REPOSITORIES: tuple[str, ...] = (
     "loomground-audit-chain",
     "loomground-brief",
     "loomground-collapse",
-    "loomground-composition",
     "loomground-deontic",
     "loomground-drift",
     "loomground-epistemic",
@@ -89,7 +86,16 @@ FAMILY_REPOSITORIES: tuple[str, ...] = (
 )
 
 EXCLUDED_PUBLIC_REPOSITORIES: dict[str, str] = {
-    ".github": "account meta-repo (community health files); not in CATALOGUE.json, not a Loomground-family artifact",
+    ".github": "account meta-repo (community health files); not a Loomground-family artifact",
 }
 
-assert len(FAMILY_REPOSITORIES) == len(set(FAMILY_REPOSITORIES)) == 43
+ARCHIVED_PUBLIC_REPOSITORIES: dict[str, str] = {
+    "loomground-composition": (
+        "archived 2026-09-16; archived repos are excluded from the family "
+        "regardless of prior membership"
+    ),
+}
+
+assert len(FAMILY_REPOSITORIES) == len(set(FAMILY_REPOSITORIES)) == 42
+assert not (set(FAMILY_REPOSITORIES) & set(EXCLUDED_PUBLIC_REPOSITORIES))
+assert not (set(FAMILY_REPOSITORIES) & set(ARCHIVED_PUBLIC_REPOSITORIES))
