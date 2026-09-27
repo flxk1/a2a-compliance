@@ -17,7 +17,48 @@ callers.
 
 `FileInbox` is the transport: a directory of per-actor mailboxes keyed by session id,
 with an `O_EXCL` sequence claim, an atomic publish (`os.replace`), and a per-mailbox
-cursor, so it is durable across process exit and delivers in order.
+cursor, so it is durable across process exit and delivers in order. Message files,
+their temporary files and sequence-claim files are created with mode 0600, so a
+mailbox's contents are readable only by the owning user; the mailbox directories and
+the `.cursor` file follow the process umask.
+
+## Authenticated and bare modes
+
+The mode is set by configuration, not negotiated on the wire.
+
+- **Bare mode** (the default: no `trust_store`). `ComplianceAgent` sends unsigned
+  envelopes, and `ControlParticipant.checkpoint()` applies any well-formed envelope
+  in its mailbox. Nothing is authenticated: every honoured message is answered with
+  `mode: "advisory"` in its response body, and `halt` dispatches on `confirm=True`,
+  an assertion of human approval made out of band.
+- **Authenticated mode** (a `trust_store` configured). A `ComplianceAgent` with a
+  `signer` stamps each outbound envelope through `envelope.stamp_and_sign`: a fresh
+  `nonce`, an `expires_at` 300 seconds ahead by default, the signer's `key_id`, and
+  an Ed25519 `signature` over the DSSE PAE of the envelope's RFC 8785 canonical
+  subject (`wire/signing.py`), so the nonce and expiry are covered by the
+  signature. A `ControlParticipant` with a `trust_store` applies an envelope only
+  if all of the following hold: `key_id` resolves in the trust store; the key is
+  bound to `A2AControlMessage`, to the sender's claimed role and to an identity
+  equal to the envelope's `from_.actor`; the signature verifies; `expires_at` is
+  in the future; the `(sender, nonce)` pair has not been seen by the `NonceStore`
+  (a durable, file-backed `FileNonceStore` under the inbox root unless one is
+  injected, never skipped, and recorded only after every other check passes); and `authorize()` allows the
+  sender's role that verb. An envelope that fails any check is never applied; the
+  maker answers `ack{accepted: false}` with the reason. An applied envelope is
+  answered with `mode: "authenticated"`. A `ComplianceAgent` with a `trust_store`
+  dispatches `halt` only with a `HumanApprovalReceipt` that verifies, is signed by
+  a key bound to the `human` role and to the approver identity it names, is bound
+  to `envelope.halt_digest` for that halt, carries the scope `next-action` or
+  `session`, and is approved by an identity other than the sender and the maker;
+  each receipt is consumed once, so it authorises a single halt. `confirm=True`
+  alone does not dispatch.
+- **Without the `crypto` extra.** Signature checks need `cryptography`. An
+  authenticated participant that cannot import it rejects every envelope (fail
+  closed); bare mode does not need it.
+
+The four authenticated-mode fields (`nonce`, `expires_at`, `key_id`,
+`signature`) are optional in `schema/a2a-control-message.schema.json` and omitted
+from a bare envelope, so a bare envelope keeps its earlier shape.
 
 ## Live send/stop transport (`a2a_compliance.harness`)
 

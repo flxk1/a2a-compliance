@@ -42,6 +42,11 @@ _STEER_VERBS = frozenset(
 # halt is a reserved act in EVERY mode (SPEC §3.2, §5.1).
 _RESERVED_VERBS = frozenset({Verb.HALT})
 
+# The role a `HumanApprovalReceipt.approver` must carry to gate a reserved
+# act in AUTHENTICATED mode (AI Act Art. 14(4) proof-of-human-presence
+# posture) -- never a compliance/maker role, and never the sender itself.
+HUMAN_ROLE = "human"
+
 
 @dataclass
 class Authorization:

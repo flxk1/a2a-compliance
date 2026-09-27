@@ -71,9 +71,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
-from ..governance_block import GovernanceBlock
+from .. import envelope as env
+from ..authority import HUMAN_ROLE, Roster
+from ..channel import ComplianceAgent
+from ..governance_block import GovernanceBlock, sign_governance_block
 from ..grounding import ACTION_NO_STEER, GroundingContext, GroundingResult
 from ..lifecycle import PREFLIGHT_TOOLS, TOOL_OWNERS
+from ..participant import ControlParticipant
 from ..team import COMPLIANCE_ROLES as TEAM_ROLES
 from ..team import CapabilityInventory, ComplianceTeam, ControlPlan, ControlRequest
 from . import canonical
@@ -90,9 +94,16 @@ from .certification import FreshnessPort, InMemoryFreshness, certify
 from .executor import ExecutionOutcome, ExecutorPort, bind_constraints, consume_and_execute
 from .obligations import issue_discharge_receipt
 from .reconciliation import ObservedEffects, reconcile
-from .signing import generate_dev_keypair
+from .signing import (
+    cnf_jkt_for_public_key,
+    dev_sign_proof_of_possession,
+    dev_sign_subject,
+    generate_dev_keypair,
+)
 from .trust import ANY, InMemoryRevocationStore, InMemoryTrustStore, RevocationStore, TrustStore
 from .verification import InMemoryNonceStore, NonceStore, verify
+from interfaces.a2a_control import Authority as ControlAuthority
+from interfaces.a2a_control import Party, Verb
 
 NORMAL_KIND = "conformance:normal"
 RESERVED_KIND = "conformance:reserved"
@@ -137,6 +148,13 @@ class ConformancePorts:
     discharger: Issuer
     certifier: Issuer
     approver_role: str = DEFAULT_APPROVER_ROLE
+    # Quick win 5 -- sender-constrained permit: the ONE executor identity and
+    # Ed25519 keypair every mediation-scenario permit is bound to via
+    # aud/cnf. A host conformance-testing a real deployment wires these to
+    # its own adapter's identity and signing key.
+    executor_identity: str = "executor:conformance-kit"
+    executor_public_key: bytes = b""
+    executor_private_key: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -144,6 +162,18 @@ class ScenarioResult:
     name: str
     passed: bool
     detail: str
+    # Quick win 10 -- machine-readable OWASP Agentic AI Top 10 (2026) id this
+    # scenario's PASS evidences (ASI01-ASI10; see the one-line comment next
+    # to each scenario's own entry in `_NEGATIVE_SCENARIOS`/`_POSITIVE_ASI`
+    # for the why). Never inferred from the name string -- always carried
+    # explicitly from the scenario's own definition, so a caller (and
+    # `tests/test_conformance_asi_tags.py`) can check it without parsing
+    # prose. REQUIRED, no default: a hand-built `ScenarioResult` that omits
+    # `asi` must raise `TypeError` at construction time rather than silently
+    # accepting an empty/invalid tag -- every `ScenarioResult` this module
+    # constructs (see `run_conformance` below) always passes a real `ASIxx`
+    # id explicitly.
+    asi: str
 
 
 @dataclass(frozen=True)
@@ -282,6 +312,32 @@ class _RecordingExecutor:
         return outcome
 
 
+class _InMemoryInbox:
+    """Quick win 10 -- a purely in-memory duck-typed stand-in for `inbox.
+    FileInbox`'s `put`/`poll` transport seam (the same seam `harness.py`'s
+    own `HarnessTransport` duck-types against instead of subclassing). Both
+    `ControlParticipant.checkpoint()` and `ComplianceAgent._send()`/
+    `.collect_replies()` call ONLY `.put()`/`.poll()` on their injected
+    inbox -- they never introspect its type -- so this satisfies the real
+    control-channel seam exactly while keeping the control-channel
+    scenarios below on the module's own no-host-effect invariant (never a
+    real file, unlike the file-backed inbox `tests/test_control_channel_
+    auth.py`/`tests/test_halt_approval.py` use for the same seam)."""
+
+    def __init__(self) -> None:
+        self._boxes: dict[str, list[dict]] = {}
+
+    def put(self, to_actor: str, msg_wire: dict) -> int:
+        box = self._boxes.setdefault(to_actor, [])
+        box.append(msg_wire)
+        return len(box) - 1
+
+    def poll(self, actor: str) -> list[dict]:
+        box = self._boxes.setdefault(actor, [])
+        pending, self._boxes[actor] = box, []
+        return pending
+
+
 def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> ConformancePorts:
     """TEST-ONLY. Builds a complete, self-contained `ConformancePorts` over
     ephemeral dev Ed25519 keys (`wire.signing.generate_dev_keypair`) and
@@ -296,8 +352,25 @@ def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> Conform
         for name in ("stage", "approval", "permit", "recorder", "reconciler", "discharger", "certifier")
     }
     trust_store = InMemoryTrustStore()
-    trust_store.add("key-conformance-stage", keys["stage"][1], frozenset({"StageReceipt"}), frozenset({ANY}))
-    trust_store.add("key-conformance-approval", keys["approval"][1], frozenset({"HumanApprovalReceipt"}), frozenset())
+    # Key-bound identity (commit 5171dec): every StageReceipt this kit issues
+    # is signed by this ONE shared "stage" key/identity regardless of which
+    # role's preflight it stands in for (`_stage_receipts` sets `issuer` to
+    # this exact bound identity for every tool) -- `ANY` role authorization
+    # covers the per-tool `role` field, but the receipt's own self-declared
+    # `issuer` must still equal what this key is actually bound to.
+    trust_store.add(
+        "key-conformance-stage", keys["stage"][1], frozenset({"StageReceipt"}), frozenset({ANY}),
+        identity="conformance:stage",
+    )
+    # Bound to the human role AND an identity (never left unbound/anonymous):
+    # a dev/test port must genuinely be able to pass the wire-level
+    # human-role/identity check (`verification._human_approval_wire_findings`,
+    # baked into plain `verify()`), never bypass it by being an
+    # intrinsically-unusable stub key.
+    trust_store.add(
+        "key-conformance-approval", keys["approval"][1], frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}),
+        identity="conformance:approver",
+    )
     trust_store.add("key-conformance-permit", keys["permit"][1], frozenset({"ExecutionPermit"}), frozenset())
     trust_store.add("key-conformance-recorder", keys["recorder"][1], frozenset({"ToolReceipt"}), frozenset())
     trust_store.add("key-conformance-reconciler", keys["reconciler"][1], frozenset({"Reconciliation"}), frozenset())
@@ -311,6 +384,8 @@ def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> Conform
 
     def _dev(name: str, identity: str) -> Issuer:
         return dev_issuer(f"key-conformance-{name}", identity, keys[name][0])
+
+    executor_private_key, executor_public_key = generate_dev_keypair()
 
     return ConformancePorts(
         trust_store=trust_store,
@@ -326,7 +401,22 @@ def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> Conform
         reconciler=_dev("reconciler", "conformance:reconciler"),
         discharger=_dev("discharger", "conformance:discharger"),
         certifier=_dev("certifier", "conformance:certifier"),
+        executor_public_key=executor_public_key,
+        executor_private_key=executor_private_key,
     )
+
+
+def _cnf_for(ports: ConformancePorts) -> dict:
+    """The `cnf` claim every sender-constrained permit in this kit issues:
+    the RFC 7638 thumbprint of `ports`' own executor keypair."""
+    return {"jkt": cnf_jkt_for_public_key(ports.executor_public_key)}
+
+
+def _dev_proof(ports: ConformancePorts, permit: dict) -> dict:
+    """The proof of possession the legitimate executor presents for
+    `permit`: an Ed25519 signature by `ports.executor_private_key` over this
+    exact permit's `(subject_digest, nonce)`."""
+    return dev_sign_proof_of_possession(permit["subject_digest"], permit["nonce"], ports.executor_private_key)
 
 
 # --- plan/receipt/approval construction (host-neutral vectors) -------------
@@ -352,12 +442,18 @@ def _build_plan(kind: str) -> ControlPlan:
 
 
 def _stage_receipts(plan: ControlPlan, stage_signer: Issuer, *, run_id: str, issued_at: datetime, expires_at: datetime) -> list[dict]:
+    """Key-bound identity (commit 5171dec): `issuer` must equal the SIGNING
+    key's bound identity, never a per-role string the key isn't actually
+    bound to -- every receipt here is signed by the one shared
+    `stage_signer`, so `issuer` is that signer's own identity throughout;
+    `role` (the per-tool `TOOL_OWNERS` value, authorized via the stage key's
+    `ANY`-role binding) is the field that still varies per tool."""
     receipts = []
     for name in PREFLIGHT_TOOLS:
         role = TOOL_OWNERS[name]
         base = {
             "schema_version": "1.0.0", "type": "StageReceipt",
-            "issuer": f"issuer:{role}",
+            "issuer": stage_signer.identity,
             "issued_at": issued_at.isoformat(), "expires_at": expires_at.isoformat(),
             "run_id": run_id, "nonce": f"{run_id}:stage:{name}",
             "key_id": stage_signer.key_id, "role": role, "capability": f"tool:{name}",
@@ -391,6 +487,13 @@ def _approval(
 
 # --- the positive scenario: a complete governed run certifies --------------
 
+# ASI10 Rogue Agents -- the positive run's PASS is the baseline every other
+# scenario's rejection is contrasted against: it shows the ONLY way to reach
+# a certified effect is through the mediated pipeline itself, never a rogue
+# path around it.
+_POSITIVE_ASI = "ASI10"
+
+
 def _scenario_positive(ports: ConformancePorts, recorder: _RecordingExecutor, reference: datetime, far_future: datetime, run_id: str):
     plan = _build_plan(NORMAL_KIND)
     receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
@@ -406,6 +509,7 @@ def _scenario_positive(ports: ConformancePorts, recorder: _RecordingExecutor, re
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"permit issuance failed: {permit_result.reasons}", None
@@ -415,6 +519,7 @@ def _scenario_positive(ports: ConformancePorts, recorder: _RecordingExecutor, re
         permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:dispatch", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit),
     )
     if not exec_result.ok:
         return False, f"execution failed: {exec_result.reasons}", None
@@ -563,22 +668,26 @@ def _scenario_reuse_nonce_replay(ports, recorder, reference, far_future, run_id)
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to test reuse: {permit_result.reasons}"
     permit = permit_result.permit
+    proof = _dev_proof(ports, permit)
 
     before = recorder.call_count
     first = consume_and_execute(
         permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:reuse-1", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=proof,
     )
     after_first = recorder.call_count
     second = consume_and_execute(
         permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:reuse-2", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=proof,
     )
     after_second = recorder.call_count
     ok = first.ok and after_first == before + 1 and (not second.ok) and after_second == after_first
@@ -603,6 +712,7 @@ def _scenario_drift_expired_permit(ports, recorder, reference, far_future, run_i
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=short_expiry, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a short-lived permit: {permit_result.reasons}"
@@ -613,6 +723,7 @@ def _scenario_drift_expired_permit(ports, recorder, reference, far_future, run_i
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:drift-expiry", revocation_store=ports.revocation_store,
         now=reference + timedelta(hours=1),
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     ok = (not result.ok) and recorder.call_count == before
     return ok, f"execute ok={result.ok} after expiry, executor call delta={recorder.call_count - before}"
@@ -632,6 +743,7 @@ def _scenario_drift_revoked_run(ports, recorder, reference, far_future, run_id):
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to revoke: {permit_result.reasons}"
@@ -645,6 +757,7 @@ def _scenario_drift_revoked_run(ports, recorder, reference, far_future, run_id):
         permit_result.permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:drift-revoked", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     ok = (not result.ok) and recorder.call_count == before
     return ok, f"execute ok={result.ok} after this run_id was revoked, executor call delta={recorder.call_count - before}"
@@ -664,6 +777,7 @@ def _scenario_argument_mutation(ports, recorder, reference, far_future, run_id):
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, permitted_arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to mutate arguments against: {permit_result.reasons}"
@@ -674,6 +788,7 @@ def _scenario_argument_mutation(ports, recorder, reference, far_future, run_id):
         permit_result.permit, tool=GOVERNED_TOOL, arguments=mutated_arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:argument-mutation", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     ok = (not result.ok) and recorder.call_count == before
     return ok, f"execute ok={result.ok} with mutated arguments, executor call delta={recorder.call_count - before}"
@@ -693,6 +808,7 @@ def _scenario_mismatched_observed_effects(ports, recorder, reference, far_future
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to dispatch: {permit_result.reasons}"
@@ -700,6 +816,7 @@ def _scenario_mismatched_observed_effects(ports, recorder, reference, far_future
         permit_result.permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:dispatch", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     if not exec_result.ok:
         return False, f"could not dispatch to test reconciliation: {exec_result.reasons}"
@@ -741,6 +858,7 @@ def _scenario_fabricated_discharge(ports, recorder, reference, far_future, run_i
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to dispatch: {permit_result.reasons}"
@@ -748,6 +866,7 @@ def _scenario_fabricated_discharge(ports, recorder, reference, far_future, run_i
         permit_result.permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:dispatch", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     if not exec_result.ok:
         return False, f"could not dispatch to test obligation discharge: {exec_result.reasons}"
@@ -775,6 +894,608 @@ def _scenario_fabricated_discharge(ports, recorder, reference, far_future, run_i
     )
     ok = (cert_result.ok is False) and any("not discharged" in r for r in cert_result.reasons)
     return ok, f"certify ok={cert_result.ok}, reasons={cert_result.reasons}"
+
+
+# --- quick win 5 negative scenarios: sender-constrained permit --------------
+
+def _scenario_foreign_executor_rejected(ports, recorder, reference, far_future, run_id):
+    """A permit sender-constrained to `ports.executor_identity`, but PRESENTED
+    by a different executor identity (a valid proof of possession, just from
+    the wrong caller) -- `aud` mismatch, rejected with no effect and the
+    nonce left unspent; the legitimate executor can still consume it
+    afterwards (proof the rejection never touched the nonce)."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, now=reference,
+    )
+    if admission.decision is not AdmissionDecision.ADMITTED:
+        return False, f"could not admit a plan to test a foreign executor: {admission.reasons}"
+    arguments = {"conformance": "foreign-executor", "run_id": run_id}
+    permit_result = issue_permit(
+        admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
+        run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
+        constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
+    )
+    if not permit_result.ok:
+        return False, f"could not issue a sender-constrained permit: {permit_result.reasons}"
+    permit = permit_result.permit
+    proof = _dev_proof(ports, permit)
+
+    before = recorder.call_count
+    foreign = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:foreign", revocation_store=ports.revocation_store, now=reference,
+        executor_identity="executor:foreign-adapter", proof_of_possession=proof,
+    )
+    after_foreign = recorder.call_count
+    legit = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:legit", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=proof,
+    )
+    after_legit = recorder.call_count
+    ok = (
+        (not foreign.ok) and after_foreign == before
+        and legit.ok and after_legit == before + 1
+    )
+    return ok, (
+        f"foreign executor ok={foreign.ok}, legitimate executor ok={legit.ok}, "
+        f"executor calls={after_foreign - before}/{after_legit - after_foreign}"
+    )
+
+
+def _scenario_missing_proof_rejected(ports, recorder, reference, far_future, run_id):
+    """A permit sender-constrained to `ports.executor_identity`, presented by
+    the RIGHT identity but with no proof of possession at all -- rejected
+    with no effect and the nonce left unspent; the same executor presenting
+    a valid proof afterwards still succeeds (proof the rejection never
+    touched the nonce)."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, now=reference,
+    )
+    if admission.decision is not AdmissionDecision.ADMITTED:
+        return False, f"could not admit a plan to test a missing proof: {admission.reasons}"
+    arguments = {"conformance": "missing-proof", "run_id": run_id}
+    permit_result = issue_permit(
+        admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
+        run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
+        constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
+    )
+    if not permit_result.ok:
+        return False, f"could not issue a sender-constrained permit: {permit_result.reasons}"
+    permit = permit_result.permit
+
+    before = recorder.call_count
+    missing = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:missing-proof", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=None,
+    )
+    after_missing = recorder.call_count
+    legit = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:legit", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit),
+    )
+    after_legit = recorder.call_count
+    ok = (
+        (not missing.ok) and after_missing == before
+        and legit.ok and after_legit == before + 1
+    )
+    return ok, (
+        f"missing-proof ok={missing.ok}, legitimate proof ok={legit.ok}, "
+        f"executor calls={after_missing - before}/{after_legit - after_missing}"
+    )
+
+
+# --- quick win 10 negative scenarios: the control-channel/governance/------
+# --- provenance seams (OWASP Agentic AI Top 10, 2026) ----------------------
+
+def _scenario_control_forged_sender_rejected(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- forged sender on the control channel. A `HOLD`
+    envelope signed by a key NEVER registered in the maker's `TrustStore`
+    (a forger who has no legitimate signing identity at all) must be
+    rejected and NEVER applied -- exactly the seam `tests/
+    test_control_channel_auth.py::test_forged_sender_not_applied_reported_
+    accepted_false` already exercises against `ControlParticipant.
+    checkpoint()` directly; this drives the identical seam in-process over
+    `_InMemoryInbox` so the module stays file-free."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    _legit_priv, legit_pub = generate_dev_keypair()
+    forger_priv, _forger_pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-comp-legit", legit_pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+    )
+    # key-forger is deliberately NEVER registered.
+    maker = ControlParticipant(
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, nonce_store=InMemoryNonceStore(),
+        state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.HOLD, body=env.hold_body("next-action"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    forged = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-forger",
+        sign=lambda d: dev_sign_subject(d, forger_priv), nonce=f"{run_id}:nonce",
+    )
+    maker.inbox.put(maker_id, forged)
+    responses = maker.checkpoint()
+    ok = (
+        len(responses) == 1 and responses[0].verb is Verb.ACK
+        and responses[0].body.get("accepted") is False and maker.is_held() is False
+    )
+    return ok, (
+        f"responses={[(r.verb.value, r.body.get('accepted')) for r in responses]}, "
+        f"held={maker.is_held()}"
+    )
+
+
+def _scenario_control_replayed_resume_rejected(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- replayed resume on the control channel. The identical
+    signed `RESUME` envelope (same sender, same nonce) delivered a second
+    time must be rejected on the second delivery -- the first delivery
+    still applies normally. Same seam as `tests/test_control_channel_auth.
+    py::test_replayed_nonce_rejected_on_second_delivery`."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    # Key-bound identity (commit fcb6a22): `from_.actor` must equal the
+    # signing key's bound identity, so this key is bound to `comp_actor`
+    # itself -- otherwise the envelope would be rejected on identity binding
+    # before ever reaching the replay check this scenario exercises.
+    trust_store.add(
+        "key-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}), identity=comp_actor,
+    )
+    maker = ControlParticipant(
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, nonce_store=InMemoryNonceStore(),
+        state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.RESUME, body=env.resume_body(f"{run_id}:hold"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    resume_wire = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-comp",
+        sign=lambda d: dev_sign_subject(d, priv), nonce=f"{run_id}:fixed-nonce",
+    )
+    maker.inbox.put(maker_id, resume_wire)
+    first = maker.checkpoint()
+    maker.inbox.put(maker_id, resume_wire)  # the identical envelope, delivered again
+    second = maker.checkpoint()
+    ok = (
+        len(first) == 1 and first[0].body.get("accepted") is True
+        and len(second) == 1 and second[0].body.get("accepted") is False
+        and "replay" in (second[0].body.get("note") or "")
+    )
+    return ok, (
+        f"first accepted={first[0].body.get('accepted')}, "
+        f"second accepted={second[0].body.get('accepted')}, note={second[0].body.get('note')!r}"
+    )
+
+
+def _scenario_control_unapproved_halt_not_dispatched(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- unapproved halt. `ComplianceAgent.halt()` in
+    AUTHENTICATED mode (a `TrustStore` configured) must never dispatch on
+    `confirm=True` alone or with no approval at all -- a reserved act is
+    surfaced to the human but NOT sent, exactly `tests/test_halt_approval.
+    py::test_no_receipt_not_dispatched`'s seam, driven here over the same
+    `ComplianceAgent.halt()` this kit's other scenarios never otherwise
+    touch."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    _priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add("key-approver", pub, frozenset({"HumanApprovalReceipt"}), frozenset())
+    comp = ComplianceAgent(
+        session_id=comp_actor, role="policy-compliance", inbox=_InMemoryInbox(),
+        roster=Roster(), trust_store=trust_store,
+    )
+    result = comp.halt(maker_id, reason_ref="conformance-quick-win-10")
+    ok = result.dispatched is False and result.surfaced_to_human is True
+    return ok, (
+        f"dispatched={result.dispatched}, surfaced_to_human={result.surfaced_to_human}, "
+        f"denied_reason={result.denied_reason!r}"
+    )
+
+
+def _scenario_tampered_governance_block_not_admitted(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- tampered governance block. A `SignedGovernanceBlock`
+    pins the ORIGINAL `GOVERNANCE` digest; `admit()` is then called against
+    a widened block (the prohibition silently dropped after signing) that
+    still hashes differently -- `admission._governance_block_findings`
+    (quick win 9) must catch the digest mismatch and refuse admission,
+    never trusting the block actually in force just because a signature
+    exists somewhere for a DIFFERENT block."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    policy_author_role = "policy-author"
+    author_priv, author_pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-policy-author"
+    # Registered under a run-scoped key_id -- never collides with the
+    # stage/permit/... bindings `dev_conformance_ports` already installed
+    # on this same shared `ports.trust_store`.
+    ports.trust_store.add(key_id, author_pub, frozenset({"GovernanceBlock"}), frozenset({policy_author_role}))
+    issuer = dev_issuer(key_id, f"policy:{run_id}-author", author_priv)
+    signed = sign_governance_block(GOVERNANCE, key_id=issuer.key_id, identity=issuer.identity, sign=issuer.sign)
+    tampered_governance = GovernanceBlock.from_dict({
+        "actions": [{"kind": NORMAL_KIND}],
+        "reserved": [{"kind": RESERVED_KIND, "by": "human"}],
+        "prohibited": [],  # attacker silently dropped the prohibition after signing
+    })
+    admission = admit(
+        plan, receipts, governance=tampered_governance, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, signed_governance_block=signed,
+        policy_author_role=policy_author_role, now=reference,
+    )
+    ok = (
+        admission.decision is not AdmissionDecision.ADMITTED
+        and admission.governance_block_digest is None
+        and any("does not match the pinned, signed digest" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_self_report_never_satisfies_admission(ports, recorder, reference, far_future, run_id):
+    """Quick win 10 -- injection-provenance. `envelope.report_state_body` is
+    the ONE existing provenance notion this package already has (SPEC
+    §3.3): a maker's own account, ALWAYS stamped `provenance:'self-report'`,
+    NEVER promoted to witnessed/observed evidence. This asserts both halves
+    of that guarantee: (a) the stamp itself never drifts off
+    `'self-report'`, and (b) even when that exact self-report body is
+    smuggled into `admit()`'s stage-receipt list in place of a required
+    preflight `StageReceipt`, `wire.verify` rejects it outright (it has
+    neither the `StageReceipt` schema shape nor a trust-store-resolvable
+    signature it could forge without a trusted key) and admission is never
+    granted on its strength -- a maker's self-report can never satisfy an
+    admission receipt."""
+    self_report = env.report_state_body(claims=[{"claim": "conformance-injection-provenance"}])
+    if self_report.get("provenance") != "self-report":
+        return False, f"self-report body drifted off provenance='self-report': {self_report!r}"
+
+    plan = _build_plan(NORMAL_KIND)
+    legitimate = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    dropped_capability = f"tool:{PREFLIGHT_TOOLS[0]}"
+    forged_as_receipt = dict(self_report)
+    forged_as_receipt.update({
+        "run_id": run_id, "nonce": f"{run_id}:stage:forged-self-report",
+        "action_digest": plan.action_digest, "capability": dropped_capability,
+    })
+    tainted = [r for r in legitimate if r["capability"] != dropped_capability]
+    tainted.append(forged_as_receipt)  # the self-report smuggled in place of the missing receipt
+
+    admission = admit(
+        plan, tainted, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, now=reference,
+    )
+    ok = (
+        admission.decision is not AdmissionDecision.ADMITTED
+        and forged_as_receipt.get("provenance") == "self-report"
+    )
+    return ok, (
+        f"decision={admission.decision.value}, reasons={admission.reasons}, "
+        f"forged.provenance={forged_as_receipt.get('provenance')!r}"
+    )
+
+
+# --- negative scenarios: the identity/channel legs' closed exploits --------
+# (agent-key-signed human approval, approver identity != key identity,
+# maker-signed governance block, envelope actor not bound to key, replayed
+# halt receipt, replayed control envelope with no injected nonce store,
+# receipt scope violation -- see commits 5171dec/fcb6a22 for the underlying
+# fixes each of these exercises).
+
+def _scenario_agent_key_signed_approval_rejected(ports, recorder, reference, far_future, run_id):
+    """An approval receipt for a RESERVED action signed by a key that IS
+    authorized for the `HumanApprovalReceipt` object type but is bound to an
+    AGENT role, never `human` -- self-declaring `approver.role: 'human'`
+    changes nothing, because `verify_human_approval` decides WHO approved
+    off the signing key's own bound role, never the receipt's self-declared
+    field. Closes the exploit where a sender's own agent key could sign its
+    own human approval (commit 5171dec)."""
+    plan = _build_plan(RESERVED_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    agent_priv, agent_pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-agent-approver"
+    identity = f"{run_id}:agent-approver"
+    # Registered on the SHARED ports.trust_store (scoped by a run-unique
+    # key_id) so the plan's own StageReceipts still verify against it too --
+    # never a throwaway store that would also break unrelated verification.
+    ports.trust_store.add(key_id, agent_pub, frozenset({"HumanApprovalReceipt"}), frozenset({"agent"}), identity=identity)
+    issuer = dev_issuer(key_id, identity, agent_priv)
+    approval = _approval(
+        plan, issuer, approver_role=HUMAN_ROLE, run_id=run_id, issued_at=reference, expires_at=far_future,
+    )
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, approval=approval,
+        approver_authority=ports.approver_authority, now=reference,
+    )
+    ok = (
+        admission.decision is AdmissionDecision.REVIEW_REQUIRED
+        and any("not bound to human role" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_approver_identity_mismatch_rejected(ports, recorder, reference, far_future, run_id):
+    """An approval receipt genuinely signed by a key bound to the `human`
+    role, but whose self-declared `approver.id` does NOT equal that key's
+    bound identity (a legitimate human key vouching for a DIFFERENT claimed
+    approver) -- `verify_human_approval` checks the self-declared id
+    against, never substitutes it for, the key-bound one (commit 5171dec)."""
+    plan = _build_plan(RESERVED_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    priv, pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-approver-identity"
+    genuine_identity = f"{run_id}:human-genuine"
+    ports.trust_store.add(key_id, pub, frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}), identity=genuine_identity)
+    issuer = dev_issuer(key_id, genuine_identity, priv)
+    approval = {
+        "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+        "issuer": f"issuer:{issuer.identity}",
+        "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
+        "run_id": run_id, "nonce": f"{run_id}:approval",
+        "key_id": issuer.key_id,
+        # self-declared id does NOT match the key's bound identity above.
+        "approver": {"id": f"{run_id}:human-imposter", "role": HUMAN_ROLE},
+        "permitted_action_digest": plan.action_digest,
+        "scope": "next-action", "reservations": [],
+    }
+    approval["subject_digest"] = canonical.subject_digest(approval)
+    approval["signature"] = issuer.sign(approval)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, approval=approval,
+        approver_authority=ports.approver_authority, now=reference,
+    )
+    ok = (
+        admission.decision is AdmissionDecision.REVIEW_REQUIRED
+        and any("does not match the signing key's bound" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_governance_block_signed_by_maker_refused(ports, recorder, reference, far_future, run_id):
+    """A signed `GovernanceBlock` whose key-bound identity equals the
+    MAKER's own id -- the maker attempting to author its own policy. This
+    must REFUSE admission outright (never REVIEW_REQUIRED, since no human
+    reviewer can repair a forged authority) -- commit 5171dec's fix to
+    `admit()`'s vocabulary for a maker-signed governance block."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    policy_author_role = "policy-author"
+    maker_priv, maker_pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-maker-as-author"
+    ports.trust_store.add(
+        key_id, maker_pub, frozenset({"GovernanceBlock"}), frozenset({policy_author_role}), identity=plan.maker_id,
+    )
+    issuer = dev_issuer(key_id, plan.maker_id, maker_priv)
+    signed = sign_governance_block(GOVERNANCE, key_id=issuer.key_id, identity=issuer.identity, sign=issuer.sign)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, signed_governance_block=signed,
+        policy_author_role=policy_author_role, now=reference,
+    )
+    ok = (
+        admission.decision is AdmissionDecision.REFUSED
+        and any("signed by the maker" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_control_actor_identity_mismatch_rejected(ports, recorder, reference, far_future, run_id):
+    """A control envelope signed by a REGISTERED key, legitimately trusted
+    for `A2AControlMessage`/`policy-compliance`, but bound to a DIFFERENT
+    identity than the envelope's own claimed `from_.actor` -- a spoofed
+    sender name riding a real key that belongs to someone else. Distinct
+    from `control_forged_sender_rejected` (an entirely UNREGISTERED key):
+    this is commit fcb6a22's key-bound-identity check on `from_.actor`
+    itself."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-other-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+        identity=f"{run_id}:someone-else",
+    )
+    maker = ControlParticipant(
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, nonce_store=InMemoryNonceStore(),
+        state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),  # claims to BE comp_actor
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.HOLD, body=env.hold_body("next-action"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    spoofed = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-other-comp",
+        sign=lambda d: dev_sign_subject(d, priv), nonce=f"{run_id}:nonce",
+    )
+    maker.inbox.put(maker_id, spoofed)
+    responses = maker.checkpoint()
+    ok = (
+        len(responses) == 1 and responses[0].verb is Verb.ACK
+        and responses[0].body.get("accepted") is False and maker.is_held() is False
+    )
+    return ok, (
+        f"responses={[(r.verb.value, r.body.get('accepted')) for r in responses]}, "
+        f"held={maker.is_held()}"
+    )
+
+
+def _scenario_replayed_halt_receipt_rejected(ports, recorder, reference, far_future, run_id):
+    """A genuinely valid, single-use halt approval receipt dispatches once;
+    presenting the IDENTICAL receipt a second time must be rejected --
+    commit fcb6a22's `(run_id, nonce)` consumption on `ComplianceAgent.
+    halt()`, distinct from the permit-replay vector and from the plain
+    control-envelope replay vector."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    approver_priv, approver_pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    approver_identity = f"{run_id}:human-approver"
+    trust_store.add(
+        "key-halt-approver", approver_pub, frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}),
+        identity=approver_identity,
+    )
+    comp = ComplianceAgent(
+        session_id=comp_actor, role="policy-compliance", inbox=_InMemoryInbox(),
+        roster=Roster(), trust_store=trust_store,
+    )
+    reason_ref = f"{run_id}:reason"
+    digest = env.halt_digest(comp_actor, maker_id, reason_ref)
+    approval = {
+        "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+        "issuer": f"issuer:{approver_identity}",
+        "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
+        "run_id": run_id, "nonce": f"{run_id}:halt-approval",
+        "key_id": "key-halt-approver",
+        "approver": {"id": approver_identity, "role": HUMAN_ROLE},
+        "permitted_action_digest": digest,
+        "scope": "next-action", "reservations": [],
+    }
+    approval["subject_digest"] = canonical.subject_digest(approval)
+    approval["signature"] = dev_sign_subject(approval, approver_priv)
+
+    first = comp.halt(maker_id, reason_ref=reason_ref, approval=approval, now=reference)
+    second = comp.halt(maker_id, reason_ref=reason_ref, approval=approval, now=reference)
+    ok = (
+        first.dispatched is True
+        and second.dispatched is False
+        and second.denied_reason is not None
+        and "already been used" in second.denied_reason
+    )
+    return ok, (
+        f"first dispatched={first.dispatched}, second dispatched={second.dispatched}, "
+        f"second reason={second.denied_reason!r}"
+    )
+
+
+def _scenario_control_replay_without_injected_nonce_store_rejected(ports, recorder, reference, far_future, run_id):
+    """A `ControlParticipant` constructed in AUTHENTICATED mode (a
+    `trust_store` configured) WITHOUT the caller injecting its own
+    `nonce_store` at all -- commit fcb6a22's fail-closed default
+    (`__post_init__` defaults to a durable `FileNonceStore` rather than
+    leaving `nonce_store` `None`) must still catch the identical signed
+    envelope delivered twice; the earlier fail-open gap silently skipped
+    this check entirely when no nonce store was configured."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-no-nonce-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+        identity=comp_actor,
+    )
+    maker = ControlParticipant(  # deliberately no nonce_store= passed
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.HOLD, body=env.hold_body("next-action"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    wire_msg = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-no-nonce-comp",
+        sign=lambda d: dev_sign_subject(d, priv), nonce=f"{run_id}:fixed-nonce",
+    )
+    maker.inbox.put(maker_id, wire_msg)
+    first = maker.checkpoint()
+    maker.inbox.put(maker_id, wire_msg)  # the identical envelope, delivered again
+    second = maker.checkpoint()
+    ok = (
+        maker.nonce_store is not None
+        and len(first) == 1 and first[0].body.get("accepted") is True
+        and len(second) == 1 and second[0].body.get("accepted") is False
+        and "replay" in (second[0].body.get("note") or "")
+    )
+    return ok, (
+        f"nonce_store_defaulted={maker.nonce_store is not None}, "
+        f"first accepted={first[0].body.get('accepted')}, second accepted={second[0].body.get('accepted')}, "
+        f"note={second[0].body.get('note')!r}"
+    )
+
+
+def _scenario_halt_receipt_scope_violation_rejected(ports, recorder, reference, far_future, run_id):
+    """A genuinely valid, human-signed, schema-valid `'next-action'`-scoped
+    halt approval dispatches the FIRST halt of a run; a SECOND, independently
+    signed, otherwise fully valid `'next-action'`-scoped receipt (its own
+    fresh `(run_id, nonce)`, its own digest, for a different halt) must be
+    REJECTED for the same run -- the scope RULE itself (`'next-action'`
+    authorises exactly one halt per run; only `'session'` scope may
+    authorise more than one), not schema validation: both receipts are
+    individually schema-valid (the `scope` enum only restricts VALUES,
+    `{'next-action', 'session'}`, never how many halts one value may cover),
+    so this exercises `channel.py`'s own scope-rule check -- disabling that
+    check makes this scenario (and the exact receipt pair) accept the
+    second halt."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    approver_priv, approver_pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    approver_identity = f"{run_id}:human-approver"
+    trust_store.add(
+        "key-scope-approver", approver_pub, frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}),
+        identity=approver_identity,
+    )
+    comp = ComplianceAgent(
+        session_id=comp_actor, role="policy-compliance", inbox=_InMemoryInbox(),
+        roster=Roster(), trust_store=trust_store,
+    )
+
+    def _approval_for(reason_ref: str, nonce: str) -> dict:
+        digest = env.halt_digest(comp_actor, maker_id, reason_ref)
+        approval = {
+            "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+            "issuer": f"issuer:{approver_identity}",
+            "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
+            "run_id": run_id, "nonce": nonce,
+            "key_id": "key-scope-approver",
+            "approver": {"id": approver_identity, "role": HUMAN_ROLE},
+            "permitted_action_digest": digest,
+            "scope": "next-action",  # schema-valid on BOTH receipts
+            "reservations": [],
+        }
+        approval["subject_digest"] = canonical.subject_digest(approval)
+        approval["signature"] = dev_sign_subject(approval, approver_priv)
+        return approval
+
+    first_reason, second_reason = f"{run_id}:reason-1", f"{run_id}:reason-2"
+    first_approval = _approval_for(first_reason, f"{run_id}:scope-approval-1")
+    second_approval = _approval_for(second_reason, f"{run_id}:scope-approval-2")
+
+    first = comp.halt(maker_id, reason_ref=first_reason, approval=first_approval, now=reference)
+    second = comp.halt(maker_id, reason_ref=second_reason, approval=second_approval, now=reference)
+    ok = (
+        first.dispatched is True
+        and second.dispatched is False
+        and second.denied_reason is not None
+        and "scope" in second.denied_reason
+        and "next-action" in second.denied_reason
+    )
+    return ok, (
+        f"first dispatched={first.dispatched}, "
+        f"second dispatched={second.dispatched}, second denied_reason={second.denied_reason!r}"
+    )
 
 
 # Scenarios whose PASS jointly evidences "bypass is tested and rejected"
@@ -808,19 +1529,126 @@ def _mediation_verified(scenarios: tuple[ScenarioResult, ...]) -> bool:
     )
 
 
-_NEGATIVE_SCENARIOS: tuple[tuple[str, Callable], ...] = (
-    ("prohibited_action_never_admits", _scenario_prohibited_never_admits),
-    ("reserved_without_approval_never_admits", _scenario_reserved_without_approval_never_admits),
-    ("ready_alone_never_admits", _scenario_ready_alone_never_admits),
-    ("non_admitted_permit_never_issued", _scenario_non_admitted_permit_never_issued),
-    ("bypass_missing_permit_rejected", _scenario_bypass_missing_permit),
-    ("bypass_tampered_permit_rejected", _scenario_bypass_tampered_permit),
-    ("reuse_nonce_replay_rejected", _scenario_reuse_nonce_replay),
-    ("drift_expired_permit_rejected", _scenario_drift_expired_permit),
-    ("drift_revoked_run_rejected", _scenario_drift_revoked_run),
-    ("argument_mutation_rejected", _scenario_argument_mutation),
-    ("mismatched_observed_effects_not_certified", _scenario_mismatched_observed_effects),
-    ("fabricated_discharge_not_certified", _scenario_fabricated_discharge),
+# Quick win 10 -- every entry now also carries a machine-readable OWASP
+# Agentic AI Top 10 (2026) id (`ASI01`-`ASI10`), one-line-justified inline,
+# for the specific attack/failure class THIS scenario's PASS evidences was
+# rejected/refused. `tests/test_conformance_asi_tags.py` asserts every
+# entry (and the positive scenario, see `_POSITIVE_ASI` above run_
+# conformance) carries a valid id.
+_NEGATIVE_SCENARIOS: tuple[tuple[str, Callable, str], ...] = (
+    # ASI01 Agent Goal Hijack -- a prohibited kind must never be admitted by
+    # smuggling a valid approval past a REFUSE ruling; that is exactly a
+    # goal-hijack attempt against the declared governance boundary.
+    ("prohibited_action_never_admits", _scenario_prohibited_never_admits, "ASI01"),
+    # ASI03 Identity and Privilege Abuse -- a reserved (higher-privilege)
+    # kind must stay unadmitted without a genuine approval; admitting it
+    # anyway would be an unearned privilege escalation.
+    ("reserved_without_approval_never_admits", _scenario_reserved_without_approval_never_admits, "ASI03"),
+    # ASI10 Rogue Agents -- a plan's own self-declared `ready` flag must
+    # never stand in for governance's own ADMITTED ruling; a plan cannot be
+    # allowed to certify its own readiness as authorization.
+    ("ready_alone_never_admits", _scenario_ready_alone_never_admits, "ASI10"),
+    # ASI02 Tool Misuse -- no `ExecutionPermit` (the only thing that lets a
+    # tool run at all) may ever be issued off a non-ADMITTED decision.
+    ("non_admitted_permit_never_issued", _scenario_non_admitted_permit_never_issued, "ASI02"),
+    # ASI05 Unexpected Code Execution -- dispatching a tool with NO permit
+    # at all is the paradigmatic unauthorized-execution case; it must never
+    # reach the executor.
+    ("bypass_missing_permit_rejected", _scenario_bypass_missing_permit, "ASI05"),
+    # ASI04 Agentic Supply Chain -- a permit mutated after issuance (its
+    # signature now stale) is a tampered signed artifact; supply-chain
+    # integrity of the authorization itself must hold.
+    ("bypass_tampered_permit_rejected", _scenario_bypass_tampered_permit, "ASI04"),
+    # ASI07 Insecure Inter-Agent Communication -- replaying a
+    # once-consumed permit is a message-replay attack against the
+    # executor's own inbound channel.
+    ("reuse_nonce_replay_rejected", _scenario_reuse_nonce_replay, "ASI07"),
+    # ASI08 Cascading Failures -- an expired permit consumed late is a
+    # time-drift failure mode that must fail closed rather than cascade a
+    # stale authorization into a live effect.
+    ("drift_expired_permit_rejected", _scenario_drift_expired_permit, "ASI08"),
+    # ASI03 Identity and Privilege Abuse -- a revoked run must lose its
+    # standing privilege immediately; a permit issued under it must not
+    # keep working past revocation.
+    ("drift_revoked_run_rejected", _scenario_drift_revoked_run, "ASI03"),
+    # ASI02 Tool Misuse -- dispatching a governed tool with arguments other
+    # than the ones actually bound into the permit is exactly a misuse of
+    # that tool call.
+    ("argument_mutation_rejected", _scenario_argument_mutation, "ASI02"),
+    # ASI06 Memory and Context Poisoning -- a tool's own self-reported
+    # success must never be trusted uncritically; independently observed
+    # effects that disagree must poison nothing downstream (no
+    # certification).
+    ("mismatched_observed_effects_not_certified", _scenario_mismatched_observed_effects, "ASI06"),
+    # ASI09 Human-Agent Trust Exploitation -- fabricating an unsigned
+    # obligation-discharge receipt is exploiting the certifier's trust in a
+    # compliance artifact to claim a duty was satisfied when it was not.
+    ("fabricated_discharge_not_certified", _scenario_fabricated_discharge, "ASI09"),
+    # ASI03 Identity and Privilege Abuse -- a permit sender-constrained to
+    # one executor identity presented by a DIFFERENT one is an identity
+    # substitution attack.
+    ("foreign_executor_rejected", _scenario_foreign_executor_rejected, "ASI03"),
+    # ASI07 Insecure Inter-Agent Communication -- the right identity with
+    # NO proof of possession at all is an unauthenticated inter-agent
+    # message; the channel itself must demand the proof, not just the
+    # claimed identity.
+    ("missing_proof_rejected", _scenario_missing_proof_rejected, "ASI07"),
+    # ASI07 Insecure Inter-Agent Communication -- a control-channel envelope
+    # signed by a key with no trust-store standing at all (a forger with no
+    # legitimate identity) must never be applied.
+    ("control_forged_sender_rejected", _scenario_control_forged_sender_rejected, "ASI07"),
+    # ASI07 Insecure Inter-Agent Communication -- the identical signed
+    # control envelope delivered twice is a replay against the control
+    # channel itself, distinct from the permit-replay vector above.
+    ("control_replayed_resume_rejected", _scenario_control_replayed_resume_rejected, "ASI07"),
+    # ASI09 Human-Agent Trust Exploitation -- dispatching a reserved halt
+    # without a verified, distinct human's approval would exploit the
+    # human-in-the-loop trust boundary the reserved-act gate exists to
+    # protect.
+    ("control_unapproved_halt_not_dispatched", _scenario_control_unapproved_halt_not_dispatched, "ASI09"),
+    # ASI04 Agentic Supply Chain -- a governance/policy artifact widened
+    # after it was signed is a tampered supply-chain input to the
+    # admission decision itself.
+    ("tampered_governance_block_not_admitted", _scenario_tampered_governance_block_not_admitted, "ASI04"),
+    # ASI06 Memory and Context Poisoning -- an unverified maker self-report,
+    # if it could satisfy an admission receipt, would poison the
+    # governance decision with attacker-influenced, unwitnessed content.
+    ("self_report_never_satisfies_admission", _scenario_self_report_never_satisfies_admission, "ASI06"),
+    # ASI09 Human-Agent Trust Exploitation -- a sender's own agent key,
+    # never bound to a human role, signing its own "human" approval is
+    # exploiting the reserved-act gate's trust in the HumanApprovalReceipt
+    # object type as if it were trust in an actual human.
+    ("agent_key_signed_approval_rejected", _scenario_agent_key_signed_approval_rejected, "ASI09"),
+    # ASI03 Identity and Privilege Abuse -- a genuinely human-role key
+    # vouching for a DIFFERENT self-declared approver identity than the one
+    # it is actually bound to is an identity-substitution privilege grab.
+    ("approver_identity_mismatch_rejected", _scenario_approver_identity_mismatch_rejected, "ASI03"),
+    # ASI03 Identity and Privilege Abuse -- a maker authoring and signing
+    # its own governance block is claiming the policy-author's authority
+    # for itself, the paradigmatic privilege escalation this leg closes.
+    ("governance_block_signed_by_maker_refused", _scenario_governance_block_signed_by_maker_refused, "ASI03"),
+    # ASI03 Identity and Privilege Abuse -- a real, registered key signing
+    # as a DIFFERENT claimed sender than the identity it is actually bound
+    # to is a sender-identity substitution on the control channel itself.
+    ("control_actor_identity_mismatch_rejected", _scenario_control_actor_identity_mismatch_rejected, "ASI03"),
+    # ASI07 Insecure Inter-Agent Communication -- replaying an
+    # already-consumed halt approval receipt is a message-replay attack
+    # against the reserved-act approval channel, distinct from the
+    # permit-replay and control-envelope-replay vectors above.
+    ("replayed_halt_receipt_rejected", _scenario_replayed_halt_receipt_rejected, "ASI07"),
+    # ASI07 Insecure Inter-Agent Communication -- a control participant
+    # constructed with no injected nonce store at all must still catch a
+    # replayed envelope via its own fail-closed default, never silently
+    # skip the check for lack of an explicit store.
+    (
+        "control_replay_without_injected_nonce_store_rejected",
+        _scenario_control_replay_without_injected_nonce_store_rejected, "ASI07",
+    ),
+    # ASI09 Human-Agent Trust Exploitation -- a genuinely human-signed halt
+    # receipt carrying an unrecognized scope is exploiting the human's
+    # trust boundary by claiming a broader/other authorization than any
+    # human actually granted.
+    ("halt_receipt_scope_violation_rejected", _scenario_halt_receipt_scope_violation_rejected, "ASI09"),
 )
 
 
@@ -845,15 +1673,15 @@ def run_conformance(ports: ConformancePorts, *, now: Optional[datetime] = None) 
         )
     except Exception as exc:  # noqa: BLE001 -- fail-closed reporting, never a crash
         ok, detail, certificate = False, f"raised {exc!r}", None
-    scenarios.append(ScenarioResult("positive_full_run_certifies", ok, detail))
+    scenarios.append(ScenarioResult("positive_full_run_certifies", ok, detail, _POSITIVE_ASI))
 
-    for name, scenario in _NEGATIVE_SCENARIOS:
+    for name, scenario, asi in _NEGATIVE_SCENARIOS:
         run_id = f"conformance-{token}-{name}"
         try:
             ok, detail = scenario(ports, recorder, reference, far_future, run_id)
         except Exception as exc:  # noqa: BLE001 -- fail-closed reporting, never a crash
             ok, detail = False, f"raised {exc!r}"
-        scenarios.append(ScenarioResult(name, ok, detail))
+        scenarios.append(ScenarioResult(name, ok, detail, asi))
 
     bypass_rejected = _mediation_verified(tuple(scenarios))
     return ConformanceReport(tuple(scenarios), bypass_rejected, certificate)

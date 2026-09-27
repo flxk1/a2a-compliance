@@ -109,9 +109,13 @@ def _stage_receipt_role_findings(obj: dict) -> list[str]:
 
 def _trust_findings(obj: dict, obj_type: str, trust_store: TrustStore) -> list[str]:
     """E1: the signing key_id must resolve, be bound to this object's type,
-    and (for StageReceipt) its role, THEN the signature itself must verify.
-    Trust roots/bindings come only from `trust_store` (deployment config),
-    never from the object's own payload."""
+    and (for StageReceipt) its role AND its self-declared `issuer` against
+    the key's bound identity (key-bound identity: `obj.get("issuer")` is a
+    self-declared field and is never trusted on its own -- it must equal
+    `binding.identity`, and a `None` identity fails this closed rather than
+    skipping it; see `trust.TrustBinding`'s docstring), THEN the signature
+    itself must verify. Trust roots/bindings come only from `trust_store`
+    (deployment config), never from the object's own payload."""
     key_id = obj.get("key_id")
     if not isinstance(key_id, str) or not key_id:
         return ["signature verification failed: key_id is empty or not a string"]
@@ -121,12 +125,61 @@ def _trust_findings(obj: dict, obj_type: str, trust_store: TrustStore) -> list[s
         return [f"unknown key_id: {key_id!r} is not resolvable by the trust store"]
     if not binding.authorizes_type(obj_type):
         return [f"key not bound to object type: {key_id!r} is not authorized to issue {obj_type!r}"]
-    if obj_type == "StageReceipt" and not binding.authorizes_role(obj.get("role")):
-        return [f"key not bound to role: {key_id!r} is not authorized to issue role {obj.get('role')!r}"]
+    if obj_type == "StageReceipt":
+        if not binding.authorizes_role(obj.get("role")):
+            return [f"key not bound to role: {key_id!r} is not authorized to issue role {obj.get('role')!r}"]
+        if binding.identity is None or obj.get("issuer") != binding.identity:
+            return [
+                f"key not bound to claimed issuer identity: {key_id!r} is not bound to "
+                f"identity {obj.get('issuer')!r}"
+            ]
 
     from . import signing  # local: only import `cryptography`'s dependency when a trust_store is actually used
 
     return signing.verify_signature(obj, binding.public_key)
+
+
+def _human_approval_wire_findings(obj: dict, trust_store: TrustStore, human_role: str) -> list[str]:
+    """E1, baked into the PLAIN `verify()` itself (not only the opt-in
+    `verify_human_approval` helper): a `HumanApprovalReceipt` never counts
+    as human-approved on its own self-declared `approver` fields. Whenever a
+    `trust_store` is supplied, the signing key must (a) be bound to
+    `human_role` ('human' by default) and (b) be bound to an `identity`
+    equal to the receipt's self-declared `approver.id` -- a key authorized
+    only for the `HumanApprovalReceipt` object type (never a human role, or
+    bound to a different identity) can never make `verify()` return ok=True
+    for this type, no matter what `approver.role`/`approver.id` it
+    self-declares. A `None`-identity binding fails this closed (see
+    `trust.TrustBinding`'s docstring), never treated as vacuously matching.
+
+    Runs only after `_trust_findings` has already resolved `key_id` to a
+    binding (so an unknown key_id is reported once, by `_trust_findings`,
+    never duplicated here)."""
+    key_id = obj.get("key_id")
+    if not isinstance(key_id, str) or not key_id:
+        return []  # already reported by _trust_findings
+    binding = trust_store.resolve(key_id)
+    if binding is None:
+        return []  # unknown key_id already reported by _trust_findings
+
+    findings: list[str] = []
+    if not binding.authorizes_role(human_role):
+        findings.append(
+            f"key not bound to human role: {key_id!r} is not authorized for role {human_role!r}"
+        )
+        return findings  # a key with no human authority can't vouch for identity either
+
+    if binding.identity is None:
+        return [f"key not bound to an identity: {key_id!r} cannot vouch for who approved this"]
+
+    approver = obj.get("approver") or {}
+    approver_id = approver.get("id")
+    if approver_id != binding.identity:
+        return [
+            f"approver id {approver_id!r} does not match the signing key's bound "
+            f"identity {binding.identity!r}"
+        ]
+    return []
 
 
 def _revocation_findings(
@@ -165,12 +218,21 @@ def verify(
     trust_store: Optional[TrustStore] = None,
     revocation_store: Optional[RevocationStore] = None,
     now: Optional[datetime] = None,
+    human_role: str = "human",
 ) -> VerificationResult:
     """Validate `obj` as a wire `obj_type`. Fail-closed: any error rejects the
     whole object; nothing here ever returns ok=True on ambiguity.
 
     `trust_store`/`revocation_store` are E1 ports: omit both and this is the
-    E0 verifier (signature opaque, no revocation check) byte-for-byte."""
+    E0 verifier (signature opaque, no revocation check) byte-for-byte.
+
+    `HumanApprovalReceipt` gets one more built-in check whenever `trust_store`
+    is supplied (not opt-in, not only available through `verify_human_
+    approval`): the signing key must be bound to `human_role` and to an
+    identity equal to the receipt's `approver.id` -- see
+    `_human_approval_wire_findings`. A caller who plainly calls `verify(obj,
+    'HumanApprovalReceipt', trust_store=...)` gets this rejection without
+    having to know about the richer `verify_human_approval` helper."""
     if obj_type not in ALL_WIRE_TYPES:
         return VerificationResult(False, (f"unknown type: {obj_type!r}",))
     if not isinstance(obj, dict):
@@ -217,6 +279,8 @@ def verify(
 
     if trust_store is not None:
         errors.extend(_trust_findings(obj, obj_type, trust_store))
+        if obj_type == "HumanApprovalReceipt":
+            errors.extend(_human_approval_wire_findings(obj, trust_store, human_role))
 
     if revocation_store is not None:
         errors.extend(_revocation_findings(obj, obj_type, revocation_store, reference))
@@ -230,3 +294,86 @@ def verify(
         nonce_store.record(obj["run_id"], obj["nonce"])
 
     return VerificationResult(True, ())
+
+
+@dataclass(frozen=True)
+class HumanApprovalVerification:
+    ok: bool
+    errors: tuple[str, ...] = field(default=())
+    approver_identity: Optional[str] = None
+
+
+def verify_human_approval(
+    approval: dict,
+    *,
+    trust_store: TrustStore,
+    revocation_store: Optional[RevocationStore] = None,
+    now: Optional[datetime] = None,
+    sender_identity: Optional[str] = None,
+    human_role: str = "human",
+) -> HumanApprovalVerification:
+    """Key-bound identity for `HumanApprovalReceipt` (closes the verifier
+    exploit: a sender's own key, authorized for the `HumanApprovalReceipt`
+    object type, self-declaring `approver.id`/`approver.role` and having
+    that trusted outright). Runs the plain `verify()` first -- schema,
+    digest, expiry, and (since `trust_store` is required here) signature,
+    type-authorization and revocation -- then adds the checks that decide
+    WHO approved, never trusting the receipt's own `approver` object alone:
+
+      1. the signing key's bound `roles` (deployment config, from
+         `trust_store`, never the receipt's own fields) must include
+         `human_role` ("human" by default) -- a key never bound to a human
+         role cannot make this receipt a human approval, no matter what
+         `approver.role` it self-declares;
+      2. the signing key must be bound to an `identity` (see
+         `trust.TrustBinding`) -- a `None` identity fails this closed, it is
+         never treated as "identity check not applicable";
+      3. `approval["approver"]["id"]` must equal that bound identity -- the
+         self-declared approver id is checked against, never substituted
+         for, the key-bound one;
+      4. if `sender_identity` is given, the bound approver identity must
+         differ from it -- callers use this to require the approver be a
+         different principal than whoever is requesting the approval (e.g.
+         an agent may not have its own key vouch for its own approval).
+
+    Returns `approver_identity` (the key-bound identity, never the
+    self-declared field) on success so a caller never has to re-read the
+    untrusted `approver.id` for anything security-relevant afterwards."""
+    result = verify(
+        approval, "HumanApprovalReceipt",
+        trust_store=trust_store, revocation_store=revocation_store, now=now,
+    )
+    if not result.ok:
+        return HumanApprovalVerification(False, result.errors)
+
+    key_id = approval.get("key_id")
+    binding = trust_store.resolve(key_id)
+    if binding is None:
+        # verify() above already resolved this key successfully; re-resolve
+        # defensively rather than assume the store is side-effect free.
+        return HumanApprovalVerification(False, (f"unknown key_id: {key_id!r}",))
+
+    if not binding.authorizes_role(human_role):
+        return HumanApprovalVerification(False, (
+            f"key not bound to human role: {key_id!r} is not authorized for role {human_role!r}",
+        ))
+
+    if binding.identity is None:
+        return HumanApprovalVerification(False, (
+            f"key not bound to an identity: {key_id!r} cannot vouch for who approved this",
+        ))
+
+    approver = approval.get("approver") or {}
+    approver_id = approver.get("id")
+    if approver_id != binding.identity:
+        return HumanApprovalVerification(False, (
+            f"approver id {approver_id!r} does not match the signing key's bound "
+            f"identity {binding.identity!r}",
+        ))
+
+    if sender_identity is not None and binding.identity == sender_identity:
+        return HumanApprovalVerification(False, (
+            "approver identity must differ from the sender identity (self-approval)",
+        ))
+
+    return HumanApprovalVerification(True, (), binding.identity)

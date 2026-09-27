@@ -91,7 +91,13 @@ class Enforcement:
 @dataclass
 class Message:
     """One A2A control message (SPEC §3.1). grounding/enforcement are additive:
-    None is a valid state, never a failure."""
+    None is a valid state, never a failure.
+
+    `nonce`/`expires_at`/`key_id`/`signature` are the authenticated-channel
+    fields (OWASP ASI07 hardening): all None in BARE/ADVISORY mode (no trust
+    store configured); populated when the sender signs the envelope for
+    AUTHENTICATED mode. Their presence alone does not mean "verified" — that
+    is `ControlParticipant.checkpoint`'s job against an injected TrustStore."""
     id: str
     ts: str
     from_: Party
@@ -103,6 +109,10 @@ class Message:
     correlates: Optional[str] = None
     grounding: Optional[Grounding] = None      # None in mode (a)
     enforcement: Optional[Enforcement] = None  # None in modes (a)/(b)
+    nonce: Optional[str] = None
+    expires_at: Optional[str] = None
+    key_id: Optional[str] = None
+    signature: Optional[str] = None
 
 
 # --- maker control-participant contract (SPEC §9) --------------------------

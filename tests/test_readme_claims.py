@@ -141,6 +141,23 @@ def test_counted_interface_claims_match_the_package():
     assert f"the {len(LOOMGROUND_REPOSITORIES)} repositories" in README
 
 
+def test_every_stated_repository_count_matches_the_assignment():
+    from a2a_compliance.team import COMPLIANCE_ROLES
+
+    assigned = len({repo for role in COMPLIANCE_ROLES for repo in role.repositories})
+    docs = {
+        "README.md": README,
+        "llms.txt": LLMS,
+        "docs/compliance-team.md":
+            (ROOT / "docs" / "compliance-team.md").read_text(encoding="utf-8"),
+    }
+    pattern = re.compile(r"\b(\d+)\s+(?:public\s+family\s+)?repositories\b")
+    for name, text in docs.items():
+        stated = [int(n) for n in pattern.findall(" ".join(text.split()))]
+        assert stated, f"{name} states no repository count"
+        assert stated == [assigned] * len(stated), (name, stated, assigned)
+
+
 def test_llms_txt_repeats_the_readme_paragraphs_verbatim():
     assert _install_paragraph(LLMS) == _install_paragraph(README)
     for bullet in ("- admission:", "- execution:", "- assurance:", "- conformance:"):

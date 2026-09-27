@@ -61,8 +61,12 @@ loomground is absent it degrades to role-based / advisory control.
    `a2a_compliance.schema`).
 2. **Role-based authority** from the ctrl team-charter roster — a compliance role
    (`policy-compliance` / `grounding` / `verify`) may steer a maker it oversees; an
-   out-of-role sender is denied; `halt` is authorized-but-reserved and is dispatched
-   only with `confirm=True` after human approval (`a2a_compliance.authority`).
+   out-of-role sender is denied; `halt` is authorized-but-reserved. In bare mode it is
+   dispatched only with `confirm=True` after human approval; with a trust store
+   configured it is dispatched only with a verified, single-use
+   `HumanApprovalReceipt` bound to that halt, signed by a key bound to the `human`
+   role and to the approver identity it names, other than the sender and the maker
+   (`a2a_compliance.authority`, `a2a_compliance.channel`).
 3. **The governance-block reader** — reads a maker's declared
    `skill-governance-block` and bounds steering: steer within `actions[]`, route
    `reserved[]` to the human, never direct into `prohibited[]` (an undeclared kind
@@ -71,7 +75,14 @@ loomground is absent it degrades to role-based / advisory control.
 4. **The maker-side cooperative-poll shim** — a maker polls a session-keyed
    file-backed inbox at its checkpoints and honours pending directives
    (`a2a_compliance.inbox`, `a2a_compliance.participant`), driven by the compliance
-   send side (`a2a_compliance.channel`).
+   send side (`a2a_compliance.channel`). Without a trust store the channel is bare:
+   envelopes are unsigned and every honoured message is answered as advisory. With
+   one it is authenticated: envelopes carry `nonce`, `expires_at`, `key_id` and an
+   Ed25519 `signature`, and the maker applies only those that verify against a
+   key bound to the sender's identity, have not expired, are not replayed (a
+   durable file-backed nonce store is the default) and are authorized for the
+   sender's role. Mailbox
+   message files are created 0600. See [transport.md](transport.md).
 5. **Value grounding** — per-plane loomground consumption and the grounded
    steer/hold/escalate decision (`a2a_compliance.planes`,
    `a2a_compliance.grounding`); see [value-grounding.md](value-grounding.md).

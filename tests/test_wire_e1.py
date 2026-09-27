@@ -42,7 +42,8 @@ def _trust_store() -> InMemoryTrustStore:
     key authorized for one role/type is not authorized for another."""
     store = InMemoryTrustStore()
     store.add("key-signer-1", _pub("key-signer-1"),
-              frozenset({"StageReceipt"}), frozenset({"evidence-grounder"}))
+              frozenset({"StageReceipt"}), frozenset({"evidence-grounder"}),
+              identity="issuer:evidence-grounder")
     store.add("key-signer-wrong-role", _pub("key-signer-wrong-role"),
               frozenset({"StageReceipt"}), frozenset({"policy-author"}))
     store.add("key-signer-wrong-type", _pub("key-signer-wrong-type"),

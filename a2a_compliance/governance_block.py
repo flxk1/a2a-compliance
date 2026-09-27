@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 class SteerDecision(str, Enum):
@@ -112,3 +112,78 @@ class GovernanceBlock:
 
     def may_steer(self, kind: str) -> bool:
         return self.rule(kind).decision is SteerDecision.STEER
+
+    # --- pinned governance block (quick win 9) ----------------------------
+
+    def to_dict(self) -> dict:
+        """A deterministic, JSON-safe view of the declared boundary this
+        block actually enforces -- the input `digest()` hashes. Sets/dict
+        become sorted lists/mappings so two `GovernanceBlock`s built from the
+        same logical content always hash identically, regardless of the
+        original YAML's key order."""
+        return {
+            "grade": self.grade,
+            "actions": sorted(self.action_kinds),
+            "reserved": {k: self.reserved[k] for k in sorted(self.reserved)},
+            "prohibited": sorted(self.prohibited),
+            "obligations": list(self.obligations),
+            "budget": dict(self.budget),
+        }
+
+    def digest(self) -> str:
+        """RFC 8785 canonical digest of `to_dict()` (quick win 9: pin the
+        governance block). Lazily imports `wire.canonical` -- `wire/__init__`
+        does not import `governance_block`, so this import is safe eagerly
+        too, but the plan calls for a lazy import here to keep this module's
+        own import graph independent of `wire`'s until a caller actually
+        needs a digest."""
+        from .wire import canonical
+
+        return canonical.digest_hex(self.to_dict())
+
+
+@dataclass(frozen=True)
+class SignedGovernanceBlock:
+    """A `GovernanceBlock` plus a policy author's signature over its pinned
+    digest (quick win 9). Deliberately NOT a JSON-schema wire type (no
+    envelope fields, no `wire.verify` entry) -- a lightweight signed-digest
+    object that `admission.admit()` checks against a `TrustStore`-resolved
+    policy-author identity, reusing `wire.signing`'s DSSE construction and
+    `wire.canonical`'s digest rather than growing a second signature format.
+    Built only via `sign_governance_block` below -- never construct one by
+    hand for anything but a test double, exactly like every other signed
+    wire object in this package."""
+
+    block: GovernanceBlock
+    digest: str
+    signer_key_id: str
+    signer_identity: str
+    signature: str
+
+    def subject(self) -> dict:
+        """The exact dict `sign_governance_block` signed and
+        `admission._governance_block_findings` re-verifies against -- no
+        `signature`/`subject_digest` field of its own, so
+        `wire.canonical.subject()`'s usual signature-stripping is a no-op
+        here and can never diverge between signing and verifying."""
+        return {
+            "governance_block_digest": self.digest,
+            "signer_key_id": self.signer_key_id,
+            "signer_identity": self.signer_identity,
+        }
+
+
+def sign_governance_block(
+    block: GovernanceBlock, *, key_id: str, identity: str, sign: Callable[[dict], str],
+) -> SignedGovernanceBlock:
+    """Sign `block.digest()` as the policy author `identity`/`key_id`.
+    `sign` has the exact `Callable[[dict], str]` shape as `wire.admission.
+    Issuer.sign` (a host typically passes `issuer.sign` directly) -- this
+    module never imports `wire.admission.Issuer` itself, to keep this file's
+    import graph independent of `admission` (which imports THIS module)."""
+    digest = block.digest()
+    subject = {"governance_block_digest": digest, "signer_key_id": key_id, "signer_identity": identity}
+    signature = sign(subject)
+    return SignedGovernanceBlock(
+        block=block, digest=digest, signer_key_id=key_id, signer_identity=identity, signature=signature,
+    )

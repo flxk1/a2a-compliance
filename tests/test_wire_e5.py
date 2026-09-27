@@ -67,6 +67,20 @@ def test_run_conformance_positive_and_every_negative_vector_pass():
         "argument_mutation_rejected",
         "mismatched_observed_effects_not_certified",
         "fabricated_discharge_not_certified",
+        "foreign_executor_rejected",
+        "missing_proof_rejected",
+        "control_forged_sender_rejected",
+        "control_replayed_resume_rejected",
+        "control_unapproved_halt_not_dispatched",
+        "tampered_governance_block_not_admitted",
+        "self_report_never_satisfies_admission",
+        "agent_key_signed_approval_rejected",
+        "approver_identity_mismatch_rejected",
+        "governance_block_signed_by_maker_refused",
+        "control_actor_identity_mismatch_rejected",
+        "replayed_halt_receipt_rejected",
+        "control_replay_without_injected_nonce_store_rejected",
+        "halt_receipt_scope_violation_rejected",
     }
 
 
@@ -97,6 +111,20 @@ def test_each_negative_scenario_is_individually_observed_to_fail_closed():
         "argument_mutation_rejected",
         "mismatched_observed_effects_not_certified",
         "fabricated_discharge_not_certified",
+        "foreign_executor_rejected",
+        "missing_proof_rejected",
+        "control_forged_sender_rejected",
+        "control_replayed_resume_rejected",
+        "control_unapproved_halt_not_dispatched",
+        "tampered_governance_block_not_admitted",
+        "self_report_never_satisfies_admission",
+        "agent_key_signed_approval_rejected",
+        "approver_identity_mismatch_rejected",
+        "governance_block_signed_by_maker_refused",
+        "control_actor_identity_mismatch_rejected",
+        "replayed_halt_receipt_rejected",
+        "control_replay_without_injected_nonce_store_rejected",
+        "halt_receipt_scope_violation_rejected",
     ):
         assert by_name[name].passed, (name, by_name[name].detail)
 
@@ -124,6 +152,8 @@ def test_a_scenario_that_raises_is_reported_as_a_failed_vector_not_a_crash():
         stage_signer=ports.stage_signer, approval_signer=ports.approval_signer,
         permit_issuer=ports.permit_issuer, tool_recorder=ports.tool_recorder,
         reconciler=ports.reconciler, discharger=ports.discharger, certifier=ports.certifier,
+        executor_identity=ports.executor_identity, executor_public_key=ports.executor_public_key,
+        executor_private_key=ports.executor_private_key,
     )
     report = run_conformance(broken, now=NOW)  # must not raise
     assert report.ok is False
@@ -198,8 +228,8 @@ def test_no_alternate_path_attestation_without_bypass_rejected_stays_advisory():
     # failure (or an untested bypass, which counts the same as a failure).
     bypassable_report = ConformanceReport(
         scenarios=(
-            ScenarioResult("positive_full_run_certifies", True, "ok"),
-            ScenarioResult("bypass_missing_permit_rejected", False, "effect happened without a permit"),
+            ScenarioResult("positive_full_run_certifies", True, "ok", asi="ASI10"),
+            ScenarioResult("bypass_missing_permit_rejected", False, "effect happened without a permit", asi="ASI05"),
         ),
         bypass_rejected=False,
     )

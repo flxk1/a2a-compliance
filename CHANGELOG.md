@@ -4,6 +4,31 @@
 
 ## Unreleased
 
+### Fixed
+
+Family definition corrected to a fresh `gh` query. The family list was
+previously derived by cross-checking `loomground`'s `CATALOGUE.json` and then
+manually re-adding one archived repository whose own README still claimed
+membership. It is now defined mechanically instead: every public,
+non-archived repository on the `flxk1` GitHub account, minus `.github`,
+verified by `gh repo list flxk1 --visibility public --limit 300 --json
+name,isArchived` (run 2026-09-27). Re-running that query against the current
+family list reproduces it exactly: 44 public repositories, 1 archived
+(`loomground-composition`) and 1 account meta-repo (`.github`) excluded,
+leaving 42. `loomground-composition`'s prior `conductor`-role assignment in
+`COMPLIANCE_ROLES` and `roles/conductor.json` is removed: an archived
+repository is not a family member and must not hold a role.
+`a2a_compliance/family.py` and `family.json` now carry the exact command and
+date instead of the old catalogue-based rationale, and record the excluded
+and archived repositories with reasons.
+`tests/test_family_assignment.py` gained offline checks (no `gh`, no network)
+that the family list contains no archived repository and not `.github`, that
+`family.py` and `family.json` agree, and that `loomground-composition`
+specifically stays unassigned. README.md, llms.txt, `docs/compliance-team.md`
+and the entry below are updated to the resulting count.
+
+Halt approval ordering. A replayed halt receipt is refused as already used; a second, independently valid `next-action` receipt for the same run is refused by the scope rule before its nonce is spent; the receipt's nonce is consumed only after every other check passes. `session` scope may authorise more than one halt in the run.
+
 ### Added
 
 Admission and permit issuance. `wire.admission.admit` returns ADMITTED,
@@ -48,7 +73,100 @@ requires both the observed bypass-rejection and the host's attestation that the
 tool has no path around the proxy, since the kit cannot observe that structural
 fact itself.
 
+Authenticated control channel. A `ComplianceAgent` configured with a
+`trust_store` and a `signer` stamps every outbound envelope with a fresh
+`nonce`, an `expires_at` (300 seconds ahead by default) and its `key_id`, and
+signs it with Ed25519 through `wire.signing` (`envelope.stamp_and_sign`). A
+`ControlParticipant` configured with a `trust_store` applies an envelope only
+when its key resolves and is bound to `A2AControlMessage`, the sender's role and
+an identity equal to the envelope's `from_.actor`, the signature verifies, it has
+not expired, its `(sender, nonce)` pair is new to the `NonceStore`, and
+`authorize()` allows the verb; any other envelope is never applied and is
+answered `ack{accepted: false}` with the reason. Without the `crypto` extra an
+authenticated participant rejects every envelope. The four
+fields are optional in `schema/a2a-control-message.schema.json` and omitted from
+a bare envelope.
+
+Sender-constrained permits. `wire.issue_permit` accepts `aud` and `cnf`
+(RFC 7800 confirmation, `cnf.jkt` an RFC 7638 thumbprint of the executor's
+Ed25519 key), only together. `wire.consume_and_execute` runs a permit carrying
+either only for the executor identity `aud` names, presenting an Ed25519 proof
+of possession by that key over the permit's `subject_digest` and nonce; a
+mismatch or a missing or invalid proof produces no effect and leaves the nonce
+unspent. `wire.signing` gains `okp_jwk`, `jwk_thumbprint`,
+`cnf_jkt_for_public_key` and `verify_proof_of_possession`.
+
+Pinned governance block. `GovernanceBlock.digest()` is the RFC 8785 digest of
+the block's boundary, and `sign_governance_block` returns a
+`SignedGovernanceBlock` a policy author signs. Given one, `wire.admit` refuses
+admission when the block in force does not hash to the signed digest, when the
+signing key's bound identity is the plan's maker or differs from the author the
+block names, or when the signing key is not bound in the `TrustStore` to
+`GovernanceBlock`, the policy-author role and an identity: a tampered,
+maker-signed, unbound or digest-mismatched block makes `admit` return REFUSED,
+checked before the approval gate, since no human review can repair a forged
+authority. On success the permit carries `governance_block_digest`. The `ExecutionPermit` schema gains
+the optional `aud`, `cnf` and `governance_block_digest` fields, and the
+`ContextManifest` schema the optional `governance_block_digest`.
+
+Conformance scenarios for the channel, the permit and the pin, each tagged.
+`wire.run_conformance` adds scenarios for a foreign executor, a missing proof of
+possession, a forged control sender, a replayed `resume`, a halt without
+approval, a tampered governance block, and a maker self-report offered as an
+admission receipt, and for the exploits the key-bound identity and durable
+nonce store close: `agent_key_signed_approval_rejected`,
+`approver_identity_mismatch_rejected`, `governance_block_signed_by_maker_refused`,
+`control_actor_identity_mismatch_rejected`, `replayed_halt_receipt_rejected`,
+`control_replay_without_injected_nonce_store_rejected` and
+`halt_receipt_scope_violation_rejected`. `run_conformance` now reports 27
+scenarios. Every `ScenarioResult` carries an OWASP Agentic AI Top 10 (2026) id
+(`ASI01`-`ASI10`) in `asi`, which is now a required field. None of the new
+scenarios changes how `Profile` grades a deployment.
+
+Key-bound identity. `TrustBinding` gains `identity`, the principal a key speaks
+for, set in deployment configuration (`InMemoryTrustStore.add(..., identity=)`)
+and never read from the signed object. Every check that decides who signed
+compares against it: `wire.verification.verify_human_approval` accepts a
+`HumanApprovalReceipt` only when its key is bound to the `human` role and to the
+identity `approver.id` names, and returns that key-bound identity; a
+`StageReceipt`'s `issuer` must equal its key's bound identity; a
+`SignedGovernanceBlock`'s author must equal its key's bound identity and differ
+from the maker; a control envelope's `from_.actor` must equal its key's bound
+identity. A key bound to no identity fails each of these checks. It is still
+accepted where `wire.verification.verify` asks only whether a key authorized
+for the object type (and, for a `StageReceipt`, the role) signed an object, as
+for an `ExecutionPermit`, `ToolReceipt` or `Reconciliation`; no claim about
+which principal signed rests on that check.
+
+Durable nonce store. `a2a_compliance.nonce_store.FileNonceStore` is a
+stdlib-only, file-backed `NonceStore`: one `O_CREAT | O_EXCL` marker per
+`(run_id, nonce)`, files 0600 under a 0700 directory. A `ControlParticipant` or
+`ComplianceAgent` constructed with a `trust_store` and no `nonce_store` defaults
+to one under its inbox root, so authenticated mode never skips the replay check,
+and rejects an envelope or halt approval if the store has been removed.
+
 ### Changed
+
+`ComplianceAgent.halt()` in authenticated mode (a `trust_store` configured)
+no longer dispatches on `confirm=True`. It dispatches only with a
+`HumanApprovalReceipt` that verifies through
+`wire.verification.verify_human_approval` (a key bound to the `human` role and
+to the approver identity the receipt names), whose `permitted_action_digest`
+equals `envelope.halt_digest` for that halt, whose `scope` is `next-action` or
+`session`, and whose key-bound approver is neither the sender nor the maker.
+The receipt is single-use: its `(run_id, nonce)` is consumed from the agent's
+`NonceStore` only after every other check passes, so a valid receipt authorises
+exactly one halt. Otherwise the halt is surfaced to the human and not sent. In bare mode (no `trust_store`)
+`confirm=True` still dispatches, and the maker answers every honoured message
+with `mode: "advisory"`; in authenticated mode, with `mode: "authenticated"`.
+
+`FileInbox` creates message files, their temporary files and sequence-claim
+files with mode 0600; sequence claims were 0644 and message files followed the
+process umask.
+
+`docs/enforcement/threat-model.md` no longer lists signature verification and
+revocation as open, names the module behind each guarantee added since E0, and
+lists what remains open.
 
 The README status line states both what `main` carries and how much of it is
 tagged, and the interface lists the admission, execution, assurance and
@@ -59,7 +177,9 @@ names the `crypto` extra and `referencing`. `tests/test_readme_claims.py`
 re-derives every counted claim in the README -- test count, Python floor,
 released version, extras, role/plane/repository counts -- from the collected
 suite, `pyproject.toml`, the CHANGELOG and the package, so a claim that stops
-being true fails the suite.
+being true fails the suite. `tests/test_wire_e5.py` expects the full, current
+scenario set, and `tests/test_conformance_scenario_registry.py` pins the
+canonical scenario names against a live `run_conformance()` report.
 
 The intended-versus-observed effect comparison is the `effect-reconciliation`
 plane's computation and reaches the receipt-gated lifecycle only as that plane's
@@ -70,6 +190,50 @@ declared owner, the fail-closed requirement, the fold's indifference to any
 effect digest it is handed, and the absence of an import of the plane -- so a
 later consolidation of the comparison into the lifecycle fails the suite. No
 public signature changed.
+
+### Fixed
+
+The compliance manifest's family list lacked a single, precisely stated
+definition. `a2a_compliance/family.py`, mirrored in `family.json`, now records
+the family list the assignment is checked against, and
+`tests/test_family_assignment.py` fails on a family repository left unassigned
+or assigned twice. README.md, llms.txt and `docs/compliance-team.md` had
+stated three different repository counts; each now states the same number,
+and `tests/test_readme_claims.py` derives it from `COMPLIANCE_ROLES` and holds
+all three documents to it.
+
+An earlier pass in this same unreleased series had assigned
+`loomground-composition` to `conductor` as an optional contract because its
+own README still claimed family membership. That repository was archived
+2026-09-16, so it is not a member of the family as now defined (every public,
+non-archived `flxk1` repository, minus `.github`); the assignment is removed
+here, before release, so no released version ever names it. The family
+definition itself is now pinned to a single re-runnable `gh` query rather
+than a hand-resolved catalogue cross-check -- see "Family definition
+corrected to a fresh `gh` query" above.
+
+The plain `wire.verification.verify` call for a `HumanApprovalReceipt` did not
+itself check the signing key's bound role/identity against the receipt's
+self-declared `approver` -- only the opt-in `verify_human_approval` wrapper
+did. `verify()` now runs that check itself whenever a `trust_store` is
+supplied: a key not bound to the `human` role, or bound to an identity other
+than `approver.id`, fails plain `verify()` too, not only its wrapper.
+`docs/enforcement/threat-model.md` attributed this check solely to
+`verify_human_approval`; it now names `verify()` itself as where it lives.
+
+`ComplianceAgent.halt`'s `scope` check (`channel.HALT_APPROVAL_SCOPES`)
+mirrored the `HumanApprovalReceipt` schema's own `scope` enum exactly, so an
+out-of-enum value was always caught by schema validation first and the
+channel's own check never ran; `'next-action'` and `'session'` were
+otherwise indistinguishable; every receipt was single-use per its own
+`(run_id, nonce)` regardless of which it declared. `'next-action'` now
+authorises exactly one halt per `run_id` (checked and recorded independently
+of the receipt's own nonce), so a second, independently signed, otherwise
+fully valid `'next-action'` receipt for a different halt in the same run is
+refused; only `'session'` scope may authorise more than one halt per run.
+The `halt_receipt_scope_violation_rejected` conformance scenario now exercises
+this rule with a schema-valid `'next-action'` scope instead of an out-of-enum
+value.
 
 ## 0.4.0
 

@@ -8,10 +8,17 @@ from pathlib import Path
 
 import pytest
 
+from datetime import datetime, timezone
+
 from a2a_compliance.wire import InMemoryNonceStore, WIRE_TYPES, verify
+from a2a_compliance.wire.canonical import subject_digest
 from a2a_compliance.wire.schema_registry import WIRE_TYPES as REG_TYPES
+from a2a_compliance.wire.signing import dev_sign_subject, generate_dev_keypair
+from a2a_compliance.wire.trust import InMemoryTrustStore
 
 VECTORS = Path(__file__).parent / "vectors"
+NOW = datetime(2026, 9, 27, tzinfo=timezone.utc)
+FAR_FUTURE = "2099-01-01T00:00:00+00:00"
 
 DIR_TO_TYPE = {
     "control_request": "ControlRequest",
@@ -180,6 +187,78 @@ def test_type_field_mismatch_is_rejected():
 def test_all_eight_wire_types_are_registered():
     assert WIRE_TYPES == REG_TYPES
     assert set(WIRE_TYPES) == set(DIR_TO_TYPE.values())
+
+
+# --- FIX 1: plain verify() itself rejects a HumanApprovalReceipt whose
+# signing key is not bound to a human role, or whose bound identity differs
+# from the self-declared approver -- WITHOUT the opt-in verify_human_approval
+# helper. See wire/verification.py's `_human_approval_wire_findings`.
+
+def _signed_human_approval_receipt(priv, *, key_id, approver_id, run_id="run-fix1", nonce="nonce-fix1") -> dict:
+    obj = {
+        "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+        "issuer": f"issuer:{approver_id}",
+        "issued_at": "2026-01-01T00:00:00+00:00",
+        "expires_at": FAR_FUTURE,
+        "run_id": run_id, "nonce": nonce, "key_id": key_id,
+        "approver": {"id": approver_id, "role": "human"},
+        "permitted_action_digest": "a" * 64,
+        "scope": "next-action", "reservations": [],
+    }
+    obj["subject_digest"] = subject_digest(obj)
+    obj["signature"] = dev_sign_subject(obj, priv)
+    return obj
+
+
+def test_plain_verify_rejects_key_not_bound_to_human_role():
+    """(i) The signing key is authorized to issue HumanApprovalReceipt and
+    self-declares a human approver, but its trust binding carries no
+    'human' role. Plain verify() -- no opt-in helper -- must reject this on
+    its own."""
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-not-human", pub, frozenset({"HumanApprovalReceipt"}), frozenset({"agent"}),
+        identity="someone",
+    )
+    obj = _signed_human_approval_receipt(priv, key_id="key-not-human", approver_id="someone")
+
+    result = verify(obj, "HumanApprovalReceipt", trust_store=trust_store, now=NOW)
+    assert result.ok is False
+    assert any("human role" in e for e in result.errors), result.errors
+
+
+def test_plain_verify_rejects_approver_id_not_equal_to_bound_identity():
+    """(ii) The signing key IS bound to the human role, but its bound
+    identity differs from the receipt's self-declared approver.id. Plain
+    verify() -- no opt-in helper -- must reject this on its own."""
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-human-imposter", pub, frozenset({"HumanApprovalReceipt"}), frozenset({"human"}),
+        identity="human-genuine",
+    )
+    obj = _signed_human_approval_receipt(priv, key_id="key-human-imposter", approver_id="human-imposter")
+
+    result = verify(obj, "HumanApprovalReceipt", trust_store=trust_store, now=NOW)
+    assert result.ok is False
+    assert any("does not match the signing key's bound" in e for e in result.errors), result.errors
+
+
+def test_plain_verify_accepts_a_genuinely_human_bound_receipt():
+    """Positive control for the two rejections above: a key genuinely bound
+    to the human role AND to the exact approver identity passes plain
+    verify() with no opt-in helper needed."""
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-human-genuine", pub, frozenset({"HumanApprovalReceipt"}), frozenset({"human"}),
+        identity="human-genuine",
+    )
+    obj = _signed_human_approval_receipt(priv, key_id="key-human-genuine", approver_id="human-genuine")
+
+    result = verify(obj, "HumanApprovalReceipt", trust_store=trust_store, now=NOW)
+    assert result.ok, result.errors
 
 
 def test_digests_fixture_matches_valid_vectors():

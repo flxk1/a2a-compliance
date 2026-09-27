@@ -12,6 +12,30 @@ role unless explicitly listed. There is no wildcard default -- a caller who
 wants a key bound to "any type" must pass that set explicitly, so a bare
 `TrustBinding(public_key, frozenset(), frozenset())` (or an unresolved
 key_id) authorizes nothing.
+
+Key-bound identity: `TrustBinding.identity` is the principal name (deployment
+config, injected the same way as `object_types`/`roles`, never read from an
+object's own payload) that this key is bound to speak for -- e.g. the actual
+human behind a `HumanApprovalReceipt`, the actual policy author behind a
+signed `GovernanceBlock`, the actual role-holder behind a `StageReceipt`.
+Backward compatibility is deliberately narrow: a binding built with
+`identity=None` (the default -- every `InMemoryTrustStore.add()` call that
+predates this field, and any caller outside this package's territory that
+never passes `identity=`, keeps behaving exactly as before) still resolves,
+still authorizes object types via `authorizes_type`, still authorizes
+StageReceipt roles via `authorizes_role`, and a signature under it still
+verifies -- none of E0/E1's original type/role/signature checks read
+`identity` at all. But a distinct, NEWER class of check -- one that answers
+"WHO signed this", not just "did a key of the right type/role sign this" --
+depends on `identity` by construction, and for those checks a `None`
+identity is not "check skipped", it is "check fails": an identity-less
+binding can prove "some key authorized for this type/role signed this",
+never "principal X signed this". Concretely, `verification.
+verify_human_approval` (a HumanApprovalReceipt's `approver.id`),
+`admission._governance_block_findings` (a signed GovernanceBlock's author),
+and `verification._trust_findings` for `StageReceipt` (its `issuer`) all
+reject when the resolved binding's `identity` is `None`, exactly as they
+reject on an outright identity mismatch -- there is no silent pass-through.
 """
 
 from __future__ import annotations
@@ -33,6 +57,7 @@ class TrustBinding:
     public_key: bytes
     object_types: frozenset[str]
     roles: frozenset[str]
+    identity: Optional[str] = None
 
     def authorizes_type(self, obj_type: str) -> bool:
         return ANY in self.object_types or obj_type in self.object_types
@@ -61,8 +86,15 @@ class InMemoryTrustStore:
         public_key: bytes,
         object_types: frozenset[str],
         roles: frozenset[str],
+        identity: Optional[str] = None,
     ) -> None:
-        self._bindings[key_id] = TrustBinding(public_key, frozenset(object_types), frozenset(roles))
+        """`identity` is keyword-optional and defaults to `None` so every
+        pre-existing call site (inside and outside this package) keeps
+        registering identity-less bindings unchanged; see `TrustBinding`'s
+        docstring for exactly which checks then fail closed."""
+        self._bindings[key_id] = TrustBinding(
+            public_key, frozenset(object_types), frozenset(roles), identity,
+        )
 
     def resolve(self, key_id: str) -> Optional[TrustBinding]:
         return self._bindings.get(key_id)

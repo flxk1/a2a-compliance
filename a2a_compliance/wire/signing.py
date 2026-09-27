@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 
 from . import canonical
 
@@ -84,6 +85,115 @@ def dev_sign_subject(obj: dict, private_key_bytes: bytes) -> str:
     private_key = Ed25519PrivateKey.from_private_bytes(private_key_bytes)
     signature = private_key.sign(pae_bytes(obj))
     return base64.b64encode(signature).decode("ascii")
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(text: str) -> bytes:
+    padding = "=" * (-len(text) % 4)
+    return base64.urlsafe_b64decode(text + padding)
+
+
+def okp_jwk(public_key_bytes: bytes) -> dict:
+    """RFC 8037 OKP JWK for a raw 32-byte Ed25519 public key: the three
+    required members (`kty`, `crv`, `x`) only -- no `kid`/`use`/etc, so this
+    is exactly what `jwk_thumbprint` below hashes."""
+    return {"kty": "OKP", "crv": "Ed25519", "x": _b64url_encode(public_key_bytes)}
+
+
+def jwk_thumbprint(jwk: dict) -> str:
+    """RFC 7638 JWK thumbprint: SHA-256 over the REQUIRED members only (for
+    an OKP key per RFC 8037 + RFC 7638 s3.2: `crv`, `kty`, `x`), the member
+    names in lexicographic order, no insignificant whitespace -- then
+    base64url with no padding. Ignores any other member `jwk` may carry
+    (e.g. `kid`), exactly as RFC 7638 requires. Reuses `wire.canonical`'s
+    RFC 8785 serialization (which already sorts keys and omits whitespace,
+    satisfying RFC 7638's own requirement) rather than growing a second JSON
+    serialization path in this module."""
+    members = {"crv": jwk["crv"], "kty": jwk["kty"], "x": jwk["x"]}
+    digest = hashlib.sha256(canonical.canonical_bytes(members)).digest()
+    return _b64url_encode(digest)
+
+
+def cnf_jkt_for_public_key(public_key_bytes: bytes) -> str:
+    """Convenience: the RFC 7638 thumbprint an `ExecutionPermit.cnf.jkt`
+    carries for a given raw Ed25519 public key (quick win 5, sender-
+    constrained permit / RFC 7800 `cnf`, DPoP-style)."""
+    return jwk_thumbprint(okp_jwk(public_key_bytes))
+
+
+def pop_pae_bytes(permit_id: str, nonce: str) -> bytes:
+    """The exact bytes a proof-of-possession signature is computed over:
+    the DSSE PAE of the RFC 8785 canonical `{permit_id, nonce}` pair (plan:
+    quick win 5 -- "an Ed25519 signature ... over the canonical {permit_id,
+    nonce}"). `permit_id` is the permit's own `subject_digest` -- the same
+    stable identifier `wire.canonical.subject_digest` already computes for
+    every wire object, never a second, separately-assigned id."""
+    return _pae(DSSE_PAYLOAD_TYPE, canonical.canonical_bytes({"permit_id": permit_id, "nonce": nonce}))
+
+
+def dev_sign_proof_of_possession(permit_id: str, nonce: str, private_key_bytes: bytes) -> dict:
+    """TEST-ONLY. Builds a `{jwk, signature}` proof-of-possession object: an
+    Ed25519 signature by `private_key_bytes` over `pop_pae_bytes(permit_id,
+    nonce)`, alongside the RFC 8037 OKP JWK for the matching public key so a
+    verifier can recompute its RFC 7638 thumbprint and check it against a
+    permit's `cnf.jkt` (see `verify_proof_of_possession`). Never a
+    production signer -- exactly like `dev_sign_subject`, this exists for
+    conformance vectors and test fixtures only."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private_key = Ed25519PrivateKey.from_private_bytes(private_key_bytes)
+    public_key_bytes = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw,
+    )
+    signature = private_key.sign(pop_pae_bytes(permit_id, nonce))
+    return {"jwk": okp_jwk(public_key_bytes), "signature": base64.b64encode(signature).decode("ascii")}
+
+
+def verify_proof_of_possession(
+    proof: dict, *, permit_id: str, nonce: str, expected_jkt: str,
+) -> list[str]:
+    """Verify a sender-constrained permit's proof of possession (quick win
+    5): `proof["jwk"]` must be an Ed25519 OKP JWK whose RFC 7638 thumbprint
+    equals `expected_jkt` (the permit's `cnf.jkt`), and `proof["signature"]`
+    must be a valid Ed25519 signature by that same key over
+    `pop_pae_bytes(permit_id, nonce)`. Returns an empty list on success, a
+    list of fail-closed reasons otherwise. Never raises."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    if not isinstance(proof, dict):
+        return ["proof of possession is not a JSON object"]
+    jwk = proof.get("jwk")
+    signature_b64 = proof.get("signature")
+    if not isinstance(jwk, dict):
+        return ["proof of possession jwk is missing or not a JSON object"]
+    if jwk.get("kty") != "OKP" or jwk.get("crv") != "Ed25519" or not isinstance(jwk.get("x"), str) or not jwk.get("x"):
+        return ["proof of possession jwk is not a valid Ed25519 OKP JWK"]
+    if not isinstance(signature_b64, str) or not signature_b64:
+        return ["proof of possession signature is empty or not a string"]
+
+    if jwk_thumbprint(jwk) != expected_jkt:
+        return ["proof of possession key does not match the permit's cnf.jkt"]
+
+    try:
+        public_key_bytes = _b64url_decode(jwk["x"])
+    except (binascii.Error, ValueError):
+        return ["proof of possession jwk.x is not valid base64url"]
+    try:
+        signature_bytes = base64.b64decode(signature_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return ["proof of possession signature is not valid base64"]
+
+    try:
+        public_key = Ed25519PublicKey.from_public_bytes(public_key_bytes)
+        public_key.verify(signature_bytes, pop_pae_bytes(permit_id, nonce))
+    except (InvalidSignature, ValueError, TypeError):
+        return ["proof of possession signature does not verify"]
+    return []
 
 
 def verify_signature(obj: dict, public_key_bytes: bytes) -> list[str]:

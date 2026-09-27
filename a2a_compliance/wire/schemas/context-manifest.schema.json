@@ -21,6 +21,11 @@
       "type": "array",
       "items": { "enum": ["deontic", "norm", "mandate", "escalation", "proxy", "falsifiability"] },
       "description": "same plane vocabulary as schema/a2a-control-message.schema.json's grounding.planes"
+    },
+    "governance_block_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "RFC 8785 digest of the GovernanceBlock declared for this run (quick win 9, pinned governance block); OPTIONAL -- carried here so admission can pin the same digest it later checks against a signed, trust-store-authorized policy author"
     }
   }
 }

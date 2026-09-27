@@ -90,7 +90,7 @@ def _stage_receipt(plan, name, priv, key_id, *, status="SATISFIED", **overrides)
     base = {
         "schema_version": "1.0.0",
         "type": "StageReceipt",
-        "issuer": f"issuer:{TOOL_OWNERS[name]}",
+        "issuer": "issuer:key-stage",
         "issued_at": "2026-09-16T00:00:00+00:00",
         "expires_at": FAR_FUTURE,
         "run_id": "run-e2-0001",
@@ -143,10 +143,12 @@ def keys():
     }
 
 
-def _trust_store(keys):
+def _trust_store(keys, *, approver_identity="human-1"):
     store = InMemoryTrustStore()
-    store.add("key-stage", keys["stage"][1], frozenset({"StageReceipt"}), frozenset({ANY}))
-    store.add("key-approver", keys["approver"][1], frozenset({"HumanApprovalReceipt"}), frozenset())
+    store.add("key-stage", keys["stage"][1], frozenset({"StageReceipt"}), frozenset({ANY}),
+              identity="issuer:key-stage")
+    store.add("key-approver", keys["approver"][1], frozenset({"HumanApprovalReceipt"}), frozenset({"human"}),
+              identity=approver_identity)
     store.add("key-approver-wrong-role", keys["approver_wrong_role"][1],
               frozenset({"HumanApprovalReceipt"}), frozenset())
     store.add("key-issuer", keys["issuer"][1], frozenset({"ExecutionPermit"}), frozenset())
@@ -469,9 +471,10 @@ def test_caller_supplied_constraints_cannot_shadow_verified_reservations(keys):
 def test_issuer_identity_equal_to_approver_identity_is_rejected(keys):
     plan = _plan("delete-prod-data", RESERVED_GOVERNANCE)
     approval = _approval(plan, keys["approver"][0], "key-approver", approver_id="same-human")
+    trust_store = _trust_store(keys, approver_identity="same-human")
     admission = admit(
         plan, _all_preflight(plan, keys["stage"][0], "key-stage"),
-        governance=RESERVED_GOVERNANCE, trust_store=_trust_store(keys),
+        governance=RESERVED_GOVERNANCE, trust_store=trust_store,
         approval=approval, approver_authority=_authority(), now=NOW,
     )
     assert admission.decision is AdmissionDecision.ADMITTED
