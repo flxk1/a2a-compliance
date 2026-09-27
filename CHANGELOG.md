@@ -210,7 +210,7 @@ non-archived `flxk1` repository, minus `.github`); the assignment is removed
 here, before release, so no released version ever names it. The family
 definition itself is now pinned to a single re-runnable `gh` query rather
 than a hand-resolved catalogue cross-check -- see "Family definition
-corrected to a fresh `gh` query" below.
+corrected to a fresh `gh` query" above.
 
 The plain `wire.verification.verify` call for a `HumanApprovalReceipt` did not
 itself check the signing key's bound role/identity against the receipt's
