@@ -130,6 +130,7 @@ COMPLIANCE_ROLES: tuple[ComplianceRole, ...] = (
         _contract("skill-governance-block"),
         _contract("governance-layer", required=False),
         _contract("loomground-ref", required=False),
+        _contract("loomground-composition", required=False),
         _contract("a2a-compliance"),
         _distribution("loomground-plugins"),
         _distribution("loomground-patchbay"),

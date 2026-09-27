@@ -1,0 +1,59 @@
+{
+  "_comment": "Human-readable mirror of a2a_compliance/family.py:FAMILY_REPOSITORIES. Not imported at runtime (family.py is the canonical, tested source); kept here for external tooling/review. Keep both in sync by hand or regenerate both from the commands below.",
+  "_regenerate": [
+    "gh repo list flxk1 --visibility public --limit 200 --json name,description",
+    "gh api repos/flxk1/loomground/contents/CATALOGUE.json -H \"Accept: application/vnd.github.raw\""
+  ],
+  "_excluded_public_repos": {
+    ".github": "account meta-repo (community health files); not in CATALOGUE.json, not a Loomground-family artifact"
+  },
+  "_manual_additions": {
+    "loomground-composition": "deprecated/archived 2026-09-16, superseded by a2a-compliance, dropped from CATALOGUE.json but still a published Loomground-family artifact per its own README (\"Family: Composition\"); manually confirmed, see a2a_compliance/family.py docstring"
+  },
+  "snapshot_date": "2026-09-27",
+  "family": [
+    "5d-nd",
+    "a2a-compliance",
+    "effect-reconciliation",
+    "enforcement-posture",
+    "evidence-emitter",
+    "governance-certification",
+    "governance-layer",
+    "loomground",
+    "loomground-audit-chain",
+    "loomground-brief",
+    "loomground-collapse",
+    "loomground-composition",
+    "loomground-deontic",
+    "loomground-drift",
+    "loomground-epistemic",
+    "loomground-erasure",
+    "loomground-escalation",
+    "loomground-factual",
+    "loomground-falsifiability",
+    "loomground-governance",
+    "loomground-ingest",
+    "loomground-lane",
+    "loomground-legal",
+    "loomground-lock",
+    "loomground-mandate",
+    "loomground-mcp",
+    "loomground-norm",
+    "loomground-patchbay",
+    "loomground-plugins",
+    "loomground-proxy",
+    "loomground-ref",
+    "loomground-solver",
+    "loomground-topos",
+    "loomground-versum",
+    "loomground-vertical",
+    "loomground-workspace",
+    "norm-freshness",
+    "obligation-discharge",
+    "oversight-certificate",
+    "oversight-ladder",
+    "policy-compiler",
+    "privacy-shield",
+    "skill-governance-block"
+  ]
+}
