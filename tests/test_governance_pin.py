@@ -70,18 +70,22 @@ def keys():
     }
 
 
+POLICY_AUTHOR_IDENTITY = "policy:author-1"
+
+
 def _trust_store(keys) -> InMemoryTrustStore:
     store = InMemoryTrustStore()
     store.add(
         "key-policy-author", keys["policy_author"][1],
         frozenset({"GovernanceBlock"}), frozenset({POLICY_AUTHOR_ROLE}),
+        identity=POLICY_AUTHOR_IDENTITY,
     )
     # key-untrusted is deliberately NOT registered.
     return store
 
 
 def _signed_by_policy_author(keys, *, block=GOVERNANCE) -> SignedGovernanceBlock:
-    issuer = dev_issuer("key-policy-author", "policy:author-1", keys["policy_author"][0])
+    issuer = dev_issuer("key-policy-author", POLICY_AUTHOR_IDENTITY, keys["policy_author"][0])
     return sign_governance_block(block, key_id=issuer.key_id, identity=issuer.identity, sign=issuer.sign)
 
 
@@ -136,6 +140,7 @@ def test_maker_signed_block_is_not_admitted(keys):
     # the rejection must come from identity distinctness, not from trust.
     trust_store.add(
         "key-maker", keys["maker"][1], frozenset({"GovernanceBlock"}), frozenset({POLICY_AUTHOR_ROLE}),
+        identity=MAKER_ID,
     )
     maker_issuer = dev_issuer("key-maker", MAKER_ID, keys["maker"][0])
     signed_by_maker = sign_governance_block(

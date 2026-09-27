@@ -54,7 +54,7 @@ from ..lifecycle import PREFLIGHT_TOOLS
 from ..team import ControlPlan, TeamProfile
 from . import canonical
 from .trust import RevocationStore, TrustStore
-from .verification import NonceStore, verify
+from .verification import NonceStore, verify, verify_human_approval
 
 
 class AdmissionDecision(str, Enum):
@@ -186,23 +186,28 @@ def _approval_findings(
     is bound to this exact action_digest, and its approver is authorized
     for `kind` by the injected `ApproverAuthority`. Never fabricated: if
     `approval` is None, this always reports a finding -- there is no path
-    that manufactures one."""
+    that manufactures one.
+
+    Key-bound identity: the approver's identity is never taken from the
+    receipt's own self-declared `approver.id`/`approver.role` alone --
+    `verify_human_approval` (see `verification.py`) additionally requires
+    the SIGNING KEY to be bound to a human role and to the exact identity
+    `approver.id` claims; a key merely authorized for the
+    `HumanApprovalReceipt` object type (but not a human role, or bound to a
+    different identity) can never make an approval count here."""
     reasons: list[str] = []
     if approval is None:
         return [f"{kind!r} is reserved and requires a HumanApprovalReceipt; none was provided"], ()
 
-    result = verify(
-        approval, "HumanApprovalReceipt",
-        trust_store=trust_store, revocation_store=revocation_store, now=now,
-    )
+    result = verify_human_approval(approval, trust_store=trust_store, revocation_store=revocation_store, now=now)
     if not result.ok:
         return ["approval receipt failed verification: " + "; ".join(result.errors)], ()
 
     if approval.get("permitted_action_digest") != plan.action_digest:
         return ["approval is not bound to this action (permitted_action_digest mismatch)"], ()
 
-    approver = approval.get("approver") or {}
-    approver_id, approver_role = approver.get("id"), approver.get("role")
+    approver_id = result.approver_identity
+    approver_role = (approval.get("approver") or {}).get("role")
     if approver_authority is None or not approver_authority.authorizes(kind, approver_id, approver_role):
         reasons.append(
             f"approver {approver_id!r}/{approver_role!r} is not authorized for reserved kind {kind!r}"
@@ -242,7 +247,17 @@ def _governance_block_findings(
     'GovernanceBlock' object type AND the `policy_author_role`. Returns
     `(reasons, digest)`: `reasons` non-empty on any failure (digest always
     `None` then); on success, `([], digest)` so the caller can pin
-    `AdmissionResult.governance_block_digest` and carry it into the permit."""
+    `AdmissionResult.governance_block_digest` and carry it into the permit.
+
+    Key-bound identity: the maker-distinctness check and the author check
+    both compare against the SIGNING KEY's bound `identity` (from
+    `trust_store`, deployment config), never the block's own self-declared
+    `signer_identity` field alone -- a `SignedGovernanceBlock.signer_identity`
+    is only trustworthy once it is shown to equal what the key is actually
+    bound to; a caller cannot forge authorship by putting a different
+    identity string in that field, and a key with no bound identity fails
+    this closed (see `trust.TrustBinding`'s docstring) rather than being
+    treated as vacuously distinct from the maker."""
     if signed_governance_block is None:
         return [], None
 
@@ -251,13 +266,6 @@ def _governance_block_findings(
         return (
             ["governance block digest does not match the pinned, signed digest "
              "(tampered or substituted block)"],
-            None,
-        )
-
-    if signed_governance_block.signer_identity == maker_id:
-        return (
-            ["governance block is signed by the maker -- the policy author "
-             "must be a distinct identity"],
             None,
         )
 
@@ -278,6 +286,25 @@ def _governance_block_findings(
         return (
             [f"key not bound to role: {signed_governance_block.signer_key_id!r} is "
              f"not authorized for role {policy_author_role!r}"],
+            None,
+        )
+
+    if binding.identity is None:
+        return (
+            [f"key not bound to an identity: {signed_governance_block.signer_key_id!r} "
+             "cannot vouch for a policy author"],
+            None,
+        )
+    if signed_governance_block.signer_identity != binding.identity:
+        return (
+            ["governance block author field does not match the signing key's bound "
+             "identity (forged author)"],
+            None,
+        )
+    if binding.identity == maker_id:
+        return (
+            ["governance block is signed by the maker -- the policy author "
+             "must be a distinct identity"],
             None,
         )
 
@@ -311,7 +338,12 @@ def admit(
     ambiguity (missing, unverified, mismatched or incomplete input) lands on
     REVIEW_REQUIRED, never ADMITTED; a `prohibited`/undeclared kind is
     REFUSED before anything else -- including `approval` -- is even
-    inspected, so a valid approval can never rescue a prohibited kind."""
+    inspected, so a valid approval can never rescue a prohibited kind. A
+    signed governance block that fails its own integrity checks (tampered
+    digest, maker-signed, unbound key, forged author field -- see
+    `_governance_block_findings`) is likewise REFUSED, not
+    REVIEW_REQUIRED, and likewise before `approval`/preflight/obligation
+    checks run; see the comment at that check site for why."""
     kind = plan.target_kind
     # Re-derive the ruling from the governance block directly (plan:
     # 'GovernanceBlock.rule(kind)') rather than trusting `plan.ruling` --
@@ -320,6 +352,29 @@ def admit(
 
     if ruling.decision is SteerDecision.REFUSE:
         return AdmissionResult(AdmissionDecision.REFUSED, plan.action_digest, kind, (ruling.reason,))
+
+    # Vocabulary: a tampered, maker-signed, unbound (key not authorized for
+    # the GovernanceBlock type/policy-author role, or not bound to an
+    # identity at all) or digest-mismatched governance block is an
+    # INTEGRITY violation of the very authority this ruling is being made
+    # under -- not an ordinary "needs a human look" gap. REVIEW_REQUIRED
+    # means a human can look at this and, by supplying what's missing
+    # (an approval, an acknowledgement, a receipt), make it ADMITTED; but no
+    # human reviewer can "repair" a forged or unauthenticated policy -- there
+    # is nothing for them to approve BUT the forgery itself. Folding this
+    # into REVIEW_REQUIRED would invite exactly that: a human rubber-stamping
+    # a ruling made under a governance block nobody legitimate ever signed.
+    # So this is REFUSED, checked BEFORE the reserved-kind approval gate and
+    # the preflight-receipt/obligation checks below, and it short-circuits
+    # them -- the same vocabulary and the same early-exit shape as a
+    # prohibited kind, because the threat is the same shape: no approval,
+    # human or otherwise, can rescue it.
+    governance_reasons, governance_block_digest = _governance_block_findings(
+        governance, signed_governance_block,
+        maker_id=plan.maker_id, trust_store=trust_store, policy_author_role=policy_author_role,
+    )
+    if governance_reasons:
+        return AdmissionResult(AdmissionDecision.REFUSED, plan.action_digest, kind, tuple(governance_reasons))
 
     reasons: list[str] = []
     reservations: tuple[str, ...] = ()
@@ -358,12 +413,6 @@ def admit(
     unacknowledged = tuple(o for o in plan.obligations if o not in set(acknowledged_obligations))
     if unacknowledged:
         reasons.append("unacknowledged obligation(s): " + ", ".join(unacknowledged))
-
-    governance_reasons, governance_block_digest = _governance_block_findings(
-        governance, signed_governance_block,
-        maker_id=plan.maker_id, trust_store=trust_store, policy_author_role=policy_author_role,
-    )
-    reasons.extend(governance_reasons)
 
     if reasons:
         return AdmissionResult(AdmissionDecision.REVIEW_REQUIRED, plan.action_digest, kind, tuple(reasons))
