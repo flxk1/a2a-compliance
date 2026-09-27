@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from interfaces.a2a_control import Verb, Party, Message, Grounding
@@ -42,11 +43,18 @@ from . import envelope as env
 from .inbox import FileInbox
 from .authority import HUMAN_ROLE, Roster, Authorization, authorize
 from .governance_block import GovernanceBlock, SteerRuling, SteerDecision
+from .nonce_store import FileNonceStore, safe_component
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from .wire.admission import Issuer
     from .wire.trust import RevocationStore, TrustStore
     from .wire.verification import NonceStore
+
+# The scopes a `HumanApprovalReceipt` may carry for a halt approval (schema:
+# human-approval-receipt.schema.json's `scope` enum). Any other value is
+# rejected explicitly here too (defense in depth alongside schema
+# validation) -- FIX 2(b): "unknown scope rejects".
+HALT_APPROVAL_SCOPES = frozenset({"next-action", "session"})
 
 
 @dataclass
@@ -81,6 +89,26 @@ class ComplianceAgent:
     revocation_store: Optional["RevocationStore"] = None
     nonce_store: Optional["NonceStore"] = None
     signer: Optional["Issuer"] = None
+
+    def __post_init__(self) -> None:
+        """FIX 2(c): AUTHENTICATED mode must never silently skip single-use
+        enforcement on a halt approval receipt just because a caller did not
+        inject its own `nonce_store` -- default to a durable `FileNonceStore`
+        scoped under this agent's own inbox root/session id (never `None`),
+        exactly the same durable-default posture `ControlParticipant` takes
+        (see `participant.py`'s `__post_init__` and `nonce_store.py`)."""
+        if self.trust_store is not None and self.nonce_store is None:
+            # See `participant.py`'s identical guard: fall back to a
+            # process-local temp directory when `inbox` is a non-durable
+            # duck-typed stand-in without a `.root`, rather than crash.
+            root_hint = getattr(self.inbox, "root", None)
+            if root_hint is not None:
+                default_root = Path(root_hint) / ".nonces" / safe_component(self.session_id)
+            else:
+                import tempfile
+
+                default_root = Path(tempfile.mkdtemp(prefix="a2a-nonce-"))
+            self.nonce_store = FileNonceStore(default_root)
 
     def _me(self) -> Party:
         return Party(actor=self.session_id, role=self.role)
@@ -263,23 +291,38 @@ class ComplianceAgent:
     def _verify_halt_approval(
         self, approval: Optional[dict], digest: str, maker: str, *, now: Optional[datetime],
     ) -> Optional[str]:
-        """Returns None when `approval` is a verified, digest-bound receipt
-        from a distinct authorized human; otherwise the denial reason.
-        AUTHENTICATED-mode-only helper — reuses the public `wire.verification.
-        verify` (E1) read-only rather than reimplementing signature/expiry/
-        replay/trust checks."""
+        """Returns None when `approval` is a verified, digest-bound,
+        single-use, in-scope receipt from a distinct authorized human;
+        otherwise the denial reason. AUTHENTICATED-mode-only helper.
+
+        Reuses `wire.verification.verify_human_approval` (E1, read-only)
+        for WHO approved: it checks the SIGNING KEY's bound role/identity
+        (deployment config), never the receipt's own self-declared
+        `approver.id`/`approver.role` fields taken at face value -- closing
+        the exact gap the recorded `exploit.py` used (a sender's own agent
+        key, authorized for `HumanApprovalReceipt` but bound to no human
+        role/identity, self-declaring a human approver).
+
+        Three checks layer on top, none of them reimplementing
+        `verify_human_approval`'s own signature/schema/trust/identity work:
+        (1) digest binding -- unchanged; (2) the bound approver identity
+        must also differ from `maker` (verify_human_approval only checks it
+        differs from the SENDER); (3) single-use + scope -- FIX 2(b): the
+        receipt's `(run_id, nonce)` is CONSUMED (atomic compare-and-set) only
+        after every other check has passed, so a forged/tampered/out-of-scope
+        receipt can never burn a legitimate nonce, and a legitimate receipt
+        can never approve a second halt."""
         if approval is None:
             return (
                 "halt requires a verified HumanApprovalReceipt in authenticated "
                 "mode; confirm=True alone does not dispatch"
             )
 
-        from .wire.verification import verify  # local: needs jsonschema/cryptography
+        from .wire.verification import verify_human_approval  # local: needs jsonschema/cryptography
 
-        result = verify(
-            approval, "HumanApprovalReceipt",
-            trust_store=self.trust_store, revocation_store=self.revocation_store,
-            nonce_store=self.nonce_store, now=now,
+        result = verify_human_approval(
+            approval, trust_store=self.trust_store, revocation_store=self.revocation_store,
+            now=now, sender_identity=self.session_id, human_role=HUMAN_ROLE,
         )
         if not result.ok:
             return "halt approval receipt failed verification: " + "; ".join(result.errors)
@@ -287,16 +330,24 @@ class ComplianceAgent:
         if approval.get("permitted_action_digest") != digest:
             return "halt approval is not bound to this halt's digest"
 
-        approver = approval.get("approver") or {}
-        approver_id = approver.get("id")
-        approver_role = approver.get("role")
-        if approver_role != HUMAN_ROLE:
-            return (
-                f"halt approver role {approver_role!r} is not an authorized "
-                f"human identity (must be {HUMAN_ROLE!r})"
-            )
-        if not approver_id or approver_id in (self.session_id, maker):
+        if result.approver_identity == maker:
             return "halt approver must be a human identity distinct from the sender/maker"
+
+        scope = approval.get("scope")
+        if scope not in HALT_APPROVAL_SCOPES:
+            return f"halt approval scope {scope!r} is not a recognized scope"
+
+        run_id, nonce = approval.get("run_id"), approval.get("nonce")
+        if not run_id or not nonce:
+            return "halt approval receipt is missing run_id/nonce needed for single-use enforcement"
+
+        if self.nonce_store is None:
+            # __post_init__ defaults this in authenticated mode; reject
+            # rather than silently skip single-use enforcement if a caller
+            # ever mutates it back to None (fail closed, FIX 2c posture).
+            return "halt approval cannot be enforced single-use without a nonce store"
+        if not self.nonce_store.consume(run_id, nonce):
+            return "halt approval receipt has already been used (single-use)"
 
         return None
 

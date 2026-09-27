@@ -43,12 +43,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
 from interfaces.a2a_control import Verb, Party, Authority, Message
 from . import envelope as env
 from .authority import Roster, authorize
 from .inbox import FileInbox
+from .nonce_store import FileNonceStore, safe_component
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from .wire.trust import TrustStore
@@ -113,6 +115,31 @@ class ControlParticipant:
     _hold_conditions: list[str] = field(default_factory=list, init=False)
     directives: list[DirectiveRecord] = field(default_factory=list, init=False)
 
+    def __post_init__(self) -> None:
+        """FIX 2(c): AUTHENTICATED mode (`trust_store` configured) must never
+        silently skip the replay check just because a caller did not inject
+        its own `nonce_store` -- that fail-open gap is exactly what the
+        recorded `replay.py` exploit relied on. When no `nonce_store` is
+        given, default to a durable `FileNonceStore` scoped under this
+        participant's own inbox root -- never leave `nonce_store` `None` in
+        authenticated mode. See `nonce_store.py` for why a durable default
+        was chosen over an outright rejection."""
+        if self.trust_store is not None and self.nonce_store is None:
+            # `inbox` is typed `FileInbox` (durable, has `.root`); a caller
+            # that duck-types in a non-durable inbox stand-in (e.g. an
+            # in-memory test double) has no durable root to scope a default
+            # under -- fall back to a fresh, process-local temp directory
+            # rather than crash, so this default never becomes a reason to
+            # reject envelopes it should otherwise accept.
+            root_hint = getattr(self.inbox, "root", None)
+            if root_hint is not None:
+                default_root = Path(root_hint) / ".nonces" / safe_component(self.session_id)
+            else:
+                import tempfile
+
+                default_root = Path(tempfile.mkdtemp(prefix="a2a-nonce-"))
+            self.nonce_store = FileNonceStore(default_root)
+
     # --- cooperative-stop signals the maker's own loop consults --------------
 
     def should_continue(self) -> bool:
@@ -168,6 +195,21 @@ class ControlParticipant:
                 False, advisory=False,
                 reason=f"key {key_id!r} is not authorized for role {msg.from_.role!r}",
             )
+        # FIX 1(a): the envelope's claimed sender must equal the signing
+        # key's bound identity -- a self-declared `from_.actor` is never
+        # trusted on its own (the same key-bound-identity posture the
+        # identity leg already applies to `HumanApprovalReceipt.approver`
+        # and `GovernanceBlock` authorship). A `None`-identity binding fails
+        # closed here too, exactly per `trust.TrustBinding`'s docstring --
+        # it is "check fails", never "check skipped".
+        if binding.identity is None or binding.identity != msg.from_.actor:
+            return _EnvelopeVerdict(
+                False, advisory=False,
+                reason=(
+                    f"key {key_id!r} is bound to identity {binding.identity!r}, "
+                    f"not the envelope's claimed sender {msg.from_.actor!r}"
+                ),
+            )
 
         try:
             from .wire import signing  # local: only requires `cryptography` here
@@ -195,12 +237,24 @@ class ControlParticipant:
         nonce = wire.get("nonce")
         if not nonce:
             return _EnvelopeVerdict(False, advisory=False, reason="missing nonce")
-        if self.nonce_store is not None:
-            if self.nonce_store.seen(msg.from_.actor, nonce):
-                return _EnvelopeVerdict(
-                    False, advisory=False,
-                    reason="nonce replay: this (sender, nonce) was already honoured",
-                )
+        # FIX 2(c): `__post_init__` guarantees `nonce_store` is never None
+        # here (AUTHENTICATED mode always has one -- an explicit injection or
+        # the durable `FileNonceStore` default); this replay check is never
+        # conditionally skipped. The `is not None` guard stays as an explicit
+        # fail-closed belt: if some future caller ever bypasses `__post_init__`
+        # by mutating `nonce_store` back to `None`, missing the check would be
+        # a silent skip, so reject instead.
+        if self.nonce_store is None:
+            return _EnvelopeVerdict(
+                False, advisory=False,
+                reason="authenticated mode requires a nonce store for replay "
+                "checking; none is configured (fail closed)",
+            )
+        if self.nonce_store.seen(msg.from_.actor, nonce):
+            return _EnvelopeVerdict(
+                False, advisory=False,
+                reason="nonce replay: this (sender, nonce) was already honoured",
+            )
 
         auth = authorize(
             from_role=msg.from_.role, verb=msg.verb,

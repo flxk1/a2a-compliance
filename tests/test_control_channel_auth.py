@@ -8,6 +8,14 @@ sender's claimed role. Any failure rejects the message -- it is never
 applied -- and is reported back as `ack{accepted: False}` with a reason.
 With no `TrustStore` configured (BARE/ADVISORY mode) an unsigned envelope is
 still read and applied, but labelled advisory.
+
+FIX 1(a) (key-bound sender identity): every `TrustBinding` registered below
+now carries an explicit `identity=` matching the actor it signs as --
+`ControlParticipant._verify_envelope` rejects an envelope whose `from_.actor`
+does not equal its signing key's bound identity, exactly the same
+key-bound-identity posture the identity leg already applies to
+`HumanApprovalReceipt.approver`. See `tests/test_channel_identity_replay.py`
+for the identity-mismatch regression itself.
 """
 
 from __future__ import annotations
@@ -42,6 +50,7 @@ def trust_store(keys):
     store.add(
         "key-comp", keys["comp"][1],
         frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+        identity=COMP,  # FIX 1(a): from_.actor must equal the key-bound identity
     )
     # A key that legitimately signs as a MAKER role (e.g. "backend") -- valid
     # signature, but that role is not a compliance role, so `authorize()`
@@ -49,6 +58,7 @@ def trust_store(keys):
     store.add(
         "key-rogue", keys["rogue"][1],
         frozenset({"A2AControlMessage"}), frozenset({"backend"}),
+        identity="backend-x",
     )
     # key-forger is deliberately NEVER registered.
     return store
