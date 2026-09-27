@@ -90,7 +90,7 @@ from .certification import FreshnessPort, InMemoryFreshness, certify
 from .executor import ExecutionOutcome, ExecutorPort, bind_constraints, consume_and_execute
 from .obligations import issue_discharge_receipt
 from .reconciliation import ObservedEffects, reconcile
-from .signing import generate_dev_keypair
+from .signing import cnf_jkt_for_public_key, dev_sign_proof_of_possession, generate_dev_keypair
 from .trust import ANY, InMemoryRevocationStore, InMemoryTrustStore, RevocationStore, TrustStore
 from .verification import InMemoryNonceStore, NonceStore, verify
 
@@ -137,6 +137,13 @@ class ConformancePorts:
     discharger: Issuer
     certifier: Issuer
     approver_role: str = DEFAULT_APPROVER_ROLE
+    # Quick win 5 -- sender-constrained permit: the ONE executor identity and
+    # Ed25519 keypair every mediation-scenario permit is bound to via
+    # aud/cnf. A host conformance-testing a real deployment wires these to
+    # its own adapter's identity and signing key.
+    executor_identity: str = "executor:conformance-kit"
+    executor_public_key: bytes = b""
+    executor_private_key: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -312,6 +319,8 @@ def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> Conform
     def _dev(name: str, identity: str) -> Issuer:
         return dev_issuer(f"key-conformance-{name}", identity, keys[name][0])
 
+    executor_private_key, executor_public_key = generate_dev_keypair()
+
     return ConformancePorts(
         trust_store=trust_store,
         revocation_store=InMemoryRevocationStore(),
@@ -326,7 +335,22 @@ def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> Conform
         reconciler=_dev("reconciler", "conformance:reconciler"),
         discharger=_dev("discharger", "conformance:discharger"),
         certifier=_dev("certifier", "conformance:certifier"),
+        executor_public_key=executor_public_key,
+        executor_private_key=executor_private_key,
     )
+
+
+def _cnf_for(ports: ConformancePorts) -> dict:
+    """The `cnf` claim every sender-constrained permit in this kit issues:
+    the RFC 7638 thumbprint of `ports`' own executor keypair."""
+    return {"jkt": cnf_jkt_for_public_key(ports.executor_public_key)}
+
+
+def _dev_proof(ports: ConformancePorts, permit: dict) -> dict:
+    """The proof of possession the legitimate executor presents for
+    `permit`: an Ed25519 signature by `ports.executor_private_key` over this
+    exact permit's `(subject_digest, nonce)`."""
+    return dev_sign_proof_of_possession(permit["subject_digest"], permit["nonce"], ports.executor_private_key)
 
 
 # --- plan/receipt/approval construction (host-neutral vectors) -------------
@@ -406,6 +430,7 @@ def _scenario_positive(ports: ConformancePorts, recorder: _RecordingExecutor, re
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"permit issuance failed: {permit_result.reasons}", None
@@ -415,6 +440,7 @@ def _scenario_positive(ports: ConformancePorts, recorder: _RecordingExecutor, re
         permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:dispatch", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit),
     )
     if not exec_result.ok:
         return False, f"execution failed: {exec_result.reasons}", None
@@ -563,22 +589,26 @@ def _scenario_reuse_nonce_replay(ports, recorder, reference, far_future, run_id)
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to test reuse: {permit_result.reasons}"
     permit = permit_result.permit
+    proof = _dev_proof(ports, permit)
 
     before = recorder.call_count
     first = consume_and_execute(
         permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:reuse-1", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=proof,
     )
     after_first = recorder.call_count
     second = consume_and_execute(
         permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:reuse-2", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=proof,
     )
     after_second = recorder.call_count
     ok = first.ok and after_first == before + 1 and (not second.ok) and after_second == after_first
@@ -603,6 +633,7 @@ def _scenario_drift_expired_permit(ports, recorder, reference, far_future, run_i
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=short_expiry, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a short-lived permit: {permit_result.reasons}"
@@ -613,6 +644,7 @@ def _scenario_drift_expired_permit(ports, recorder, reference, far_future, run_i
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:drift-expiry", revocation_store=ports.revocation_store,
         now=reference + timedelta(hours=1),
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     ok = (not result.ok) and recorder.call_count == before
     return ok, f"execute ok={result.ok} after expiry, executor call delta={recorder.call_count - before}"
@@ -632,6 +664,7 @@ def _scenario_drift_revoked_run(ports, recorder, reference, far_future, run_id):
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to revoke: {permit_result.reasons}"
@@ -645,6 +678,7 @@ def _scenario_drift_revoked_run(ports, recorder, reference, far_future, run_id):
         permit_result.permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:drift-revoked", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     ok = (not result.ok) and recorder.call_count == before
     return ok, f"execute ok={result.ok} after this run_id was revoked, executor call delta={recorder.call_count - before}"
@@ -664,6 +698,7 @@ def _scenario_argument_mutation(ports, recorder, reference, far_future, run_id):
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, permitted_arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to mutate arguments against: {permit_result.reasons}"
@@ -674,6 +709,7 @@ def _scenario_argument_mutation(ports, recorder, reference, far_future, run_id):
         permit_result.permit, tool=GOVERNED_TOOL, arguments=mutated_arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:argument-mutation", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     ok = (not result.ok) and recorder.call_count == before
     return ok, f"execute ok={result.ok} with mutated arguments, executor call delta={recorder.call_count - before}"
@@ -693,6 +729,7 @@ def _scenario_mismatched_observed_effects(ports, recorder, reference, far_future
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to dispatch: {permit_result.reasons}"
@@ -700,6 +737,7 @@ def _scenario_mismatched_observed_effects(ports, recorder, reference, far_future
         permit_result.permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:dispatch", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     if not exec_result.ok:
         return False, f"could not dispatch to test reconciliation: {exec_result.reasons}"
@@ -741,6 +779,7 @@ def _scenario_fabricated_discharge(ports, recorder, reference, far_future, run_i
         admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
         run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
         constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
     )
     if not permit_result.ok:
         return False, f"could not issue a permit to dispatch: {permit_result.reasons}"
@@ -748,6 +787,7 @@ def _scenario_fabricated_discharge(ports, recorder, reference, far_future, run_i
         permit_result.permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
         nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
         dispatch_id=f"{run_id}:dispatch", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit_result.permit),
     )
     if not exec_result.ok:
         return False, f"could not dispatch to test obligation discharge: {exec_result.reasons}"
@@ -775,6 +815,109 @@ def _scenario_fabricated_discharge(ports, recorder, reference, far_future, run_i
     )
     ok = (cert_result.ok is False) and any("not discharged" in r for r in cert_result.reasons)
     return ok, f"certify ok={cert_result.ok}, reasons={cert_result.reasons}"
+
+
+# --- quick win 5 negative scenarios: sender-constrained permit --------------
+
+def _scenario_foreign_executor_rejected(ports, recorder, reference, far_future, run_id):
+    """A permit sender-constrained to `ports.executor_identity`, but PRESENTED
+    by a different executor identity (a valid proof of possession, just from
+    the wrong caller) -- `aud` mismatch, rejected with no effect and the
+    nonce left unspent; the legitimate executor can still consume it
+    afterwards (proof the rejection never touched the nonce)."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, now=reference,
+    )
+    if admission.decision is not AdmissionDecision.ADMITTED:
+        return False, f"could not admit a plan to test a foreign executor: {admission.reasons}"
+    arguments = {"conformance": "foreign-executor", "run_id": run_id}
+    permit_result = issue_permit(
+        admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
+        run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
+        constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
+    )
+    if not permit_result.ok:
+        return False, f"could not issue a sender-constrained permit: {permit_result.reasons}"
+    permit = permit_result.permit
+    proof = _dev_proof(ports, permit)
+
+    before = recorder.call_count
+    foreign = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:foreign", revocation_store=ports.revocation_store, now=reference,
+        executor_identity="executor:foreign-adapter", proof_of_possession=proof,
+    )
+    after_foreign = recorder.call_count
+    legit = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:legit", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=proof,
+    )
+    after_legit = recorder.call_count
+    ok = (
+        (not foreign.ok) and after_foreign == before
+        and legit.ok and after_legit == before + 1
+    )
+    return ok, (
+        f"foreign executor ok={foreign.ok}, legitimate executor ok={legit.ok}, "
+        f"executor calls={after_foreign - before}/{after_legit - after_foreign}"
+    )
+
+
+def _scenario_missing_proof_rejected(ports, recorder, reference, far_future, run_id):
+    """A permit sender-constrained to `ports.executor_identity`, presented by
+    the RIGHT identity but with no proof of possession at all -- rejected
+    with no effect and the nonce left unspent; the same executor presenting
+    a valid proof afterwards still succeeds (proof the rejection never
+    touched the nonce)."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, now=reference,
+    )
+    if admission.decision is not AdmissionDecision.ADMITTED:
+        return False, f"could not admit a plan to test a missing proof: {admission.reasons}"
+    arguments = {"conformance": "missing-proof", "run_id": run_id}
+    permit_result = issue_permit(
+        admission, issuer=ports.permit_issuer, enforcement_grade="mediated", adapter="conformance-kit",
+        run_id=run_id, nonce=f"{run_id}:permit", expires_at=far_future, nonce_store=ports.nonce_store,
+        constraints=bind_constraints(GOVERNED_TOOL, arguments), issued_at=reference,
+        aud=ports.executor_identity, cnf=_cnf_for(ports),
+    )
+    if not permit_result.ok:
+        return False, f"could not issue a sender-constrained permit: {permit_result.reasons}"
+    permit = permit_result.permit
+
+    before = recorder.call_count
+    missing = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:missing-proof", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=None,
+    )
+    after_missing = recorder.call_count
+    legit = consume_and_execute(
+        permit, tool=GOVERNED_TOOL, arguments=arguments, trust_store=ports.trust_store,
+        nonce_store=ports.nonce_store, executor=recorder, signer=ports.tool_recorder,
+        dispatch_id=f"{run_id}:legit", revocation_store=ports.revocation_store, now=reference,
+        executor_identity=ports.executor_identity, proof_of_possession=_dev_proof(ports, permit),
+    )
+    after_legit = recorder.call_count
+    ok = (
+        (not missing.ok) and after_missing == before
+        and legit.ok and after_legit == before + 1
+    )
+    return ok, (
+        f"missing-proof ok={missing.ok}, legitimate proof ok={legit.ok}, "
+        f"executor calls={after_missing - before}/{after_legit - after_missing}"
+    )
 
 
 # Scenarios whose PASS jointly evidences "bypass is tested and rejected"
@@ -821,6 +964,8 @@ _NEGATIVE_SCENARIOS: tuple[tuple[str, Callable], ...] = (
     ("argument_mutation_rejected", _scenario_argument_mutation),
     ("mismatched_observed_effects_not_certified", _scenario_mismatched_observed_effects),
     ("fabricated_discharge_not_certified", _scenario_fabricated_discharge),
+    ("foreign_executor_rejected", _scenario_foreign_executor_rejected),
+    ("missing_proof_rejected", _scenario_missing_proof_rejected),
 )
 
 

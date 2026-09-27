@@ -1,6 +1,10 @@
 {
   "action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "adapter": "subprocess",
+  "aud": "adapter:runtime-controller-1",
+  "cnf": {
+    "jkt": "NzbLsXh8uDCcd-6MNwXF4W7noWXFwv1R2AN2SUxr2m8"
+  },
   "constraints": {
     "lane": "ci",
     "lock": [
@@ -9,6 +13,7 @@
   },
   "enforcement_grade": "mediated",
   "expires_at": "2099-01-01T00:00:00+00:00",
+  "governance_block_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "issued_at": "2026-09-16T00:00:00+00:00",
   "issuer": "issuer:runtime-controller-1",
   "key_id": "key-issuer-1",
@@ -16,6 +21,6 @@
   "run_id": "run-0001",
   "schema_version": "1.0.0",
   "signature": "opaque-signature-not-verified-in-e0",
-  "subject_digest": "b5fa5b335c06231b641f48acc502341218848cbc2cf1d911a4eb2798966dc90b",
+  "subject_digest": "7d4ebdde45a069217b6b9cb957ed7e986fc058ed20b6046f9d9a3d4171549c4b",
   "type": "ExecutionPermit"
 }

@@ -67,6 +67,8 @@ def test_run_conformance_positive_and_every_negative_vector_pass():
         "argument_mutation_rejected",
         "mismatched_observed_effects_not_certified",
         "fabricated_discharge_not_certified",
+        "foreign_executor_rejected",
+        "missing_proof_rejected",
     }
 
 
@@ -97,6 +99,8 @@ def test_each_negative_scenario_is_individually_observed_to_fail_closed():
         "argument_mutation_rejected",
         "mismatched_observed_effects_not_certified",
         "fabricated_discharge_not_certified",
+        "foreign_executor_rejected",
+        "missing_proof_rejected",
     ):
         assert by_name[name].passed, (name, by_name[name].detail)
 
@@ -124,6 +128,8 @@ def test_a_scenario_that_raises_is_reported_as_a_failed_vector_not_a_crash():
         stage_signer=ports.stage_signer, approval_signer=ports.approval_signer,
         permit_issuer=ports.permit_issuer, tool_recorder=ports.tool_recorder,
         reconciler=ports.reconciler, discharger=ports.discharger, certifier=ports.certifier,
+        executor_identity=ports.executor_identity, executor_public_key=ports.executor_public_key,
+        executor_private_key=ports.executor_private_key,
     )
     report = run_conformance(broken, now=NOW)  # must not raise
     assert report.ok is False

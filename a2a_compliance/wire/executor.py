@@ -26,6 +26,12 @@ criterion):
    revocation_store=..., now=...)` -- catches a missing/invalid/forged/
    wrong-key permit (bypass) AND a permit that was valid at admission but is
    now expired or revoked (drift). No permit, no verification.
+1.5. Sender-constraint (quick win 5, RFC 7800 `cnf`/DPoP-style): a permit
+   carrying `aud`/`cnf` binds one executor identity and one confirmed key.
+   `executor_identity` must equal `aud`, and `proof_of_possession` must be a
+   verified Ed25519 signature -- by the key `cnf.jkt` names -- over this
+   permit's own `(subject_digest, nonce)`. Aud mismatch or a missing/invalid
+   proof is rejected here, before the nonce is spent.
 2. The ACTUAL `(tool, arguments)` about to be executed must match what the
    permit binds via its `constraints` (see `bind_constraints` below): same
    tool name, same `arguments_digest`. A caller who mutates arguments after
@@ -109,6 +115,46 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _sender_constraint_findings(
+    permit: dict,
+    *,
+    permit_aud: object,
+    permit_cnf: object,
+    executor_identity: Optional[str],
+    proof_of_possession: Optional[dict],
+) -> list[str]:
+    """Quick win 5 -- sender-constrained permit (RFC 7800 `cnf`, DPoP-style).
+    Called only once `permit_aud`/`permit_cnf` is known to be present (see
+    caller): both must then be well-formed, the CALLING executor's own
+    identity must equal `aud`, and it must present a verified Ed25519 proof
+    of possession -- by the key `cnf.jkt` names -- over this permit's own
+    `(subject_digest, nonce)`, all BEFORE the nonce is ever consumed. Any one
+    of these missing/mismatched/invalid rejects the whole call; nothing here
+    ever falls back to the unconstrained path once `aud`/`cnf` is present."""
+    if not isinstance(permit_aud, str) or not permit_aud:
+        return ["sender-constrained permit: aud is missing or not a string"]
+    if not isinstance(permit_cnf, dict):
+        return ["sender-constrained permit: cnf is missing or not an object"]
+    jkt = permit_cnf.get("jkt")
+    if not isinstance(jkt, str) or not jkt:
+        return ["sender-constrained permit: cnf.jkt is missing or not a string"]
+    if executor_identity != permit_aud:
+        return [
+            f"aud mismatch: permit binds {permit_aud!r}, executor identity is {executor_identity!r}",
+        ]
+    if proof_of_possession is None:
+        return ["proof of possession is required for a sender-constrained permit but was not provided"]
+
+    from . import signing  # local: only import cryptography's dependency when a proof actually needs verifying
+
+    return signing.verify_proof_of_possession(
+        proof_of_possession,
+        permit_id=permit.get("subject_digest"),
+        nonce=permit.get("nonce"),
+        expected_jkt=jkt,
+    )
+
+
 def consume_and_execute(
     permit: dict,
     *,
@@ -120,6 +166,8 @@ def consume_and_execute(
     signer: Issuer,
     dispatch_id: str,
     revocation_store: Optional[RevocationStore] = None,
+    executor_identity: Optional[str] = None,
+    proof_of_possession: Optional[dict] = None,
     now: Optional[datetime] = None,
     schema_version: str = "1.0.0",
     receipt_ttl: timedelta = DEFAULT_RECEIPT_TTL,
@@ -154,6 +202,20 @@ def consume_and_execute(
         return ExecutionResult(False, None, (
             f"enforcement_grade {grade!r} does not authorize mediated execution",
         ))
+
+    # 1.5 sender-constraint (quick win 5) -- a permit carrying EITHER `aud`
+    # or `cnf` is sender-constrained and needs both, plus a verified proof
+    # of possession, before anything is consumed. A permit with NEITHER
+    # field is not sender-constrained (back-compatible with hosts that never
+    # set them) and skips this check entirely.
+    permit_aud, permit_cnf = permit.get("aud"), permit.get("cnf")
+    if permit_aud is not None or permit_cnf is not None:
+        sender_errors = _sender_constraint_findings(
+            permit, permit_aud=permit_aud, permit_cnf=permit_cnf,
+            executor_identity=executor_identity, proof_of_possession=proof_of_possession,
+        )
+        if sender_errors:
+            return ExecutionResult(False, None, tuple(sender_errors))
 
     # 2. match -- the actual (tool, arguments) must equal what the permit's
     # constraints bind (see bind_constraints); anything else is an argument

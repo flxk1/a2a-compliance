@@ -49,7 +49,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, Iterable, Optional, Protocol
 
-from ..governance_block import GovernanceBlock, SteerDecision
+from ..governance_block import GovernanceBlock, SignedGovernanceBlock, SteerDecision
 from ..lifecycle import PREFLIGHT_TOOLS
 from ..team import ControlPlan, TeamProfile
 from . import canonical
@@ -70,6 +70,7 @@ class AdmissionResult:
     kind: str
     reasons: tuple[str, ...] = ()
     approval_reservations: tuple[str, ...] = ()
+    governance_block_digest: Optional[str] = None
 
 
 class ApproverAuthority(Protocol):
@@ -214,6 +215,84 @@ def _approval_findings(
     return [], tuple(approval.get("reservations") or ())
 
 
+# Public alias -- `_approval_findings` stays importable under its private
+# name, unchanged in signature and semantics (the control leg imports it
+# concurrently); this is an ADDITIVE alias, never a replacement.
+approval_findings = _approval_findings
+
+
+def _governance_block_findings(
+    governance: GovernanceBlock,
+    signed_governance_block: Optional[SignedGovernanceBlock],
+    *,
+    maker_id: str,
+    trust_store: TrustStore,
+    policy_author_role: str,
+) -> tuple[list[str], Optional[str]]:
+    """Quick win 9 -- pinned governance block: opt-in gate. `admit()` with no
+    `signed_governance_block` behaves exactly as before (the pre-existing
+    self-declared boundary, unpinned). When one IS supplied, the
+    `governance` block actually used for this ruling must (a) hash to
+    EXACTLY the digest the policy author signed (a tampered/swapped block
+    fails here, before its signer or role is ever inspected), (b) be signed
+    by an identity distinct from this plan's maker (the threat model's four
+    principals: policy author, approver, tool executor, assurance signer --
+    never let the maker author its own governing block), and (c) resolve
+    through the injected `TrustStore` to a key authorized for the
+    'GovernanceBlock' object type AND the `policy_author_role`. Returns
+    `(reasons, digest)`: `reasons` non-empty on any failure (digest always
+    `None` then); on success, `([], digest)` so the caller can pin
+    `AdmissionResult.governance_block_digest` and carry it into the permit."""
+    if signed_governance_block is None:
+        return [], None
+
+    actual_digest = governance.digest()
+    if signed_governance_block.digest != actual_digest:
+        return (
+            ["governance block digest does not match the pinned, signed digest "
+             "(tampered or substituted block)"],
+            None,
+        )
+
+    if signed_governance_block.signer_identity == maker_id:
+        return (
+            ["governance block is signed by the maker -- the policy author "
+             "must be a distinct identity"],
+            None,
+        )
+
+    binding = trust_store.resolve(signed_governance_block.signer_key_id)
+    if binding is None:
+        return (
+            [f"unknown key_id: {signed_governance_block.signer_key_id!r} is not "
+             "resolvable by the trust store"],
+            None,
+        )
+    if not binding.authorizes_type("GovernanceBlock"):
+        return (
+            [f"key not bound to object type: {signed_governance_block.signer_key_id!r} "
+             "is not authorized to sign a GovernanceBlock"],
+            None,
+        )
+    if not binding.authorizes_role(policy_author_role):
+        return (
+            [f"key not bound to role: {signed_governance_block.signer_key_id!r} is "
+             f"not authorized for role {policy_author_role!r}"],
+            None,
+        )
+
+    from . import signing  # local: only import cryptography's dependency when actually verifying a signature
+
+    subject = signed_governance_block.subject()
+    sig_errors = signing.verify_signature(
+        {**subject, "signature": signed_governance_block.signature}, binding.public_key,
+    )
+    if sig_errors:
+        return [f"governance block signature verification failed: {'; '.join(sig_errors)}"], None
+
+    return [], actual_digest
+
+
 def admit(
     plan: ControlPlan,
     stage_receipts: Iterable[dict],
@@ -224,6 +303,8 @@ def admit(
     approval: Optional[dict] = None,
     approver_authority: Optional[ApproverAuthority] = None,
     acknowledged_obligations: Iterable[str] = (),
+    signed_governance_block: Optional[SignedGovernanceBlock] = None,
+    policy_author_role: str = "policy-author",
     now: Optional[datetime] = None,
 ) -> AdmissionResult:
     """Decide ADMITTED / REVIEW_REQUIRED / REFUSED. Fail-closed: any
@@ -278,12 +359,19 @@ def admit(
     if unacknowledged:
         reasons.append("unacknowledged obligation(s): " + ", ".join(unacknowledged))
 
+    governance_reasons, governance_block_digest = _governance_block_findings(
+        governance, signed_governance_block,
+        maker_id=plan.maker_id, trust_store=trust_store, policy_author_role=policy_author_role,
+    )
+    reasons.extend(governance_reasons)
+
     if reasons:
         return AdmissionResult(AdmissionDecision.REVIEW_REQUIRED, plan.action_digest, kind, tuple(reasons))
 
     return AdmissionResult(
         AdmissionDecision.ADMITTED, plan.action_digest, kind,
         approval_reservations=reservations,
+        governance_block_digest=governance_block_digest,
     )
 
 
@@ -306,6 +394,8 @@ def issue_permit(
     nonce_store: NonceStore,
     constraints: Optional[dict] = None,
     approval: Optional[dict] = None,
+    aud: Optional[str] = None,
+    cnf: Optional[dict] = None,
     issued_at: Optional[datetime] = None,
     schema_version: str = "1.0.0",
 ) -> PermitIssueResult:
@@ -354,6 +444,28 @@ def issue_permit(
         "adapter": adapter,
         "constraints": merged_constraints,
     }
+    if aud is not None:
+        # Quick win 5: sender-constrain this permit to one executor/adapter
+        # identity. `cnf` MUST accompany it (RFC 7800 -- an audience without
+        # a confirmed key is not sender-constrained) -- never issued alone.
+        if cnf is None:
+            return PermitIssueResult(False, None, (
+                "aud was supplied without cnf -- a sender-constrained permit "
+                "needs both",
+            ))
+        permit["aud"] = aud
+    if cnf is not None:
+        if aud is None:
+            return PermitIssueResult(False, None, (
+                "cnf was supplied without aud -- a sender-constrained permit "
+                "needs both",
+            ))
+        permit["cnf"] = dict(cnf)
+    if admission.governance_block_digest is not None:
+        # Quick win 9: carry the pinned digest `admit()` already verified
+        # into the permit itself, never recomputed or re-derived here.
+        permit["governance_block_digest"] = admission.governance_block_digest
+
     permit["subject_digest"] = canonical.subject_digest(permit)
     permit["signature"] = issuer.sign(permit)
 
