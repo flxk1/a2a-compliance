@@ -69,7 +69,7 @@ the skill to dispatch, erase, certify, or write evidence by itself.
 The A2A control-message contract (both directions, all three modes), the maker
 control-participant contract, the value-plane consumption seam, the
 governance-block seam, the authority model, and the plane manifest are defined in
-[`../../SPEC.md`](../../SPEC.md) and implemented in the `a2a_compliance` package:
+[`../../docs/spec.md`](../../docs/spec.md) and implemented in the `a2a_compliance` package:
 the control channel and cooperative-poll participant, role-based authority from
 the team-charter roster, the governance-block reader, and the value grounding —
 `planes.py` consumes the six loomground value planes behind per-plane

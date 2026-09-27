@@ -2,7 +2,7 @@
 <!-- Copyright 2026 flxk1 -->
 # Transport — cooperative poll, and the opt-in live send/stop
 
-Moved out of the README under the family README canon. Design: [`../SPEC.md`](../SPEC.md) §9, §11.
+Moved out of the README under the family README canon. Design: [`spec.md`](spec.md) §9, §11.
 
 ## Cooperative poll — the default, and its honest limit
 

@@ -2,7 +2,7 @@
 <!-- Copyright 2026 flxk1 -->
 # Value grounding — steer/hold/escalate drawn from the value graph
 
-Moved out of the README under the family README canon. Design: [`../SPEC.md`](../SPEC.md) §4.
+Moved out of the README under the family README canon. Design: [`spec.md`](spec.md) §4.
 
 When a loomground value plane is present, a compliance agent derives its criterion
 from the grounded value graph instead of the role's advisory judgement. The seam is

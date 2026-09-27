@@ -1,7 +1,7 @@
 # a2a-compliance — SPEC (design, not a build)
 
-**Status:** SPEC. Staged locally only (`git init`, no remote). No skill logic is
-implemented; any code shown is interface-only.
+**Status:** SPEC. The `a2a_compliance` package implements it; any code shown
+here is interface-only.
 
 **The mission (operator's framing).** *A loomground fleet to control your agents
 and protect your values.* A **compliance fleet** watches the **maker** agents
@@ -179,7 +179,7 @@ description.
 | verb | body (shape) | semantics |
 |---|---|---|
 | `report-state` | `{ mandate?: {...}, trajectory?: [step], tools?: {name:count}, claims?: [claim], provenance: "self-report" }` | answer a `query-state`; **honestly tiered** — a maker's self-report is `provenance:"self-report"` and is NEVER rendered as witnessed/observed |
-| `ack` | `{ directive_ref, accepted: bool, note? }` | acknowledge a directive; `accepted:false` with a note is a *principled refusal* (see gaps §11) |
+| `ack` | `{ directive_ref, accepted: bool, note? }` | acknowledge a directive; `accepted:false` with a note is a *principled refusal* (see gaps §13) |
 | `escalate` | `{ trigger, detail, requested: "guidance"\|"authority"\|"human" }` | the maker raises a decision it cannot make within its boundary — routed up the authority chain |
 
 - `report-state` is the maker's own account and is **self-report tier** — the
@@ -273,7 +273,7 @@ suites). **Verdict: all six are REAL-CONSUME** — each has an installed,
 importable package with a typed, callable API returning the common solver
 `Verdict`. There is **no stub among the value repos.** (The genuine stubs in this
 system are elsewhere — the maker-side A2A shim and the live-steering channel;
-see §11.)
+see §13.)
 
 The four "operator" planes (mandate / escalation / proxy / falsifiability) all
 return the same solver `Verdict` and fold via `fold_*` → `IssueAggregate`, so a
@@ -295,8 +295,8 @@ criterion; the four operator planes are independent *checks* over a maker's run.
 capability* — it passes generic inputs (a norm text, a mandate + trajectory, an
 autonomy request + factors, proxy readings, evidence claims) and reads back a
 generic `Verdict`. Nothing in the seam is fleet-specific; the same call would
-serve any host. The seam lives in one module (`interfaces/compliance_fleet.py`)
-and each plane import is guarded and flag-gated — absent/unimportable → the
+serve any host. The seam is declared in `interfaces/compliance_fleet.py` and
+implemented in `a2a_compliance/planes.py`; each plane import is guarded and flag-gated — absent/unimportable → the
 flag is off and the advisory fallback runs (§4.3), never a crash.
 
 ### 4.3 Degradation contract
@@ -488,9 +488,11 @@ halt(msg)              -> ack{halted}               # stop on a halt directive
   receives its prompt at spawn and returns a final report; there is no live
   inbound channel by which a running subagent receives an `issue-directive` or a
   `halt` mid-run. The maker-side participant is therefore a **named STUB** — the
-  most load-bearing one in this SPEC (§11).
+  most load-bearing one in this SPEC (§13).
 - **The shim.** Until makers natively participate, a thin **maker A2A shim**
-  bridges the gap. Design options (to be decided at build):
+  bridges the gap. Design options (option 1 is built as `a2a_compliance.inbox` +
+  `a2a_compliance.participant`; option 3 as `a2a_compliance.harness`, for makers it
+  spawns):
   1. **cooperative poll** — the maker checks an A2A inbox (a file/queue keyed by
      its session id) at turn boundaries and honours pending directives. Works
      within the current harness; `halt` takes effect at the next checkpoint, not
@@ -532,7 +534,7 @@ spec, a sibling to `skill-governance-block`.** The argument:
 `spec/` core (verbs, envelope, participant contract, authority, three-mode
 degradation) + a `bindings/` appendix (one binding each: ctrl team-charter as the
 role-authority binding, loomground planes as the value-criterion binding, and external enforcement as
-the enforcement binding). This SPEC.md is the working design; the neutral split
+the enforcement binding). This SPEC is the working design; the neutral split
 is the recommended shape at publication (a reserved act — not performed here).
 
 ---
@@ -625,10 +627,8 @@ allowed_edges:
    auto-override a refusal; escalate to the human (consistent with the reserved-
    act posture).
 4. **All six value planes are REAL-CONSUME — no value-plane stub.** This is a
-   positive finding, but note the fleet has not yet been *integration-tested*
-   against live plane instances end-to-end; the seam signatures are read from the
-   packages, not exercised through the fleet. The interface risk is low
-   (uniform `Verdict`), the integration risk is unmeasured.
+   positive finding; the fleet is integration-tested against all six plane
+   packages end-to-end (`tests/test_grounding_grounded.py`).
 5. **Which value graph / which policy is "the operator's values" by default.**
    How an operator declares *the* value graph the fleet grounds against (a
    loomground policy handle, a `.lg` patch, a versum scope) is unspecified —

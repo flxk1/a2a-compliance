@@ -70,6 +70,10 @@ Runtime controls. `ComplianceTeam` assigns the 42 repositories to eight roles. O
 
 Mediation reaches only effects routed through `wire.consume_and_execute`. Dispatch, enforcement, erasure and evidence writing stay host acts, and a maker holding another route to an effect is outside the control plane; `wire.Profile` grades that deployment `advisory` unless the host attests there is no path around the proxy.
 
+## How this is made
+
+The code and documentation are written with Loomground agents. The maintainer reads and corrects all of it.
+
 ## License
 
 Apache-2.0 `LICENSES/Apache-2.0.txt` · `REUSE.toml`

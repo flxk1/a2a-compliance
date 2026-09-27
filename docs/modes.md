@@ -3,7 +3,7 @@
 # Modes, axes, and invariants
 
 Moved out of the README under the family README canon. The full design is
-[`../SPEC.md`](../SPEC.md).
+[`spec.md`](spec.md).
 
 ## Two overriding invariants
 
@@ -111,7 +111,7 @@ external enforcement = the enforcement binding).
 
 ```
 a2a-compliance/
-├── .claude-plugin/plugin.json          # ctrl-plane plugin ("skills": "./skills/")
+├── .claude-plugin/plugin.json          # ctrl-plane plugin (mcpServers: loomground-mcp)
 ├── skills/compliance-fleet/SKILL.md    # skill manifest + governance: block
 ├── schema/a2a-control-message.schema.json   # the A2A envelope
 ├── interfaces/a2a_control.py           # message contract + participant SEAM (Protocols)
@@ -128,8 +128,7 @@ a2a-compliance/
 │   ├── planes.py                       #   per-plane loomground consumption
 │   └── grounding.py                    #   derivation + steer/hold/escalate mapping
 ├── tests/                              # bare-mode end-to-end + value grounding
-├── docs/                               # this directory
-├── pyproject.toml                      # package + [schema]/[manifest]/[dev] extras
-├── SPEC.md                             # the design
+├── docs/                               # this directory; spec.md is the design
+├── pyproject.toml                      # package + [schema]/[manifest]/[crypto]/[dev] extras
 └── README.md
 ```
