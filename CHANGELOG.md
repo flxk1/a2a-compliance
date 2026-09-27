@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+
+Halt approval ordering. A replayed halt receipt is refused as already used; a second, independently valid `next-action` receipt for the same run is refused by the scope rule before its nonce is spent; the receipt's nonce is consumed only after every other check passes. `session` scope may authorise more than one halt in the run.
+
 ### Added
 
 Admission and permit issuance. `wire.admission.admit` returns ADMITTED,
