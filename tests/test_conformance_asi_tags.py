@@ -56,14 +56,12 @@ def test_asi_ids_stay_distinguishable_from_the_scenario_name():
         assert scenario.asi not in scenario.name
 
 
-def test_scenario_result_requires_no_positional_shortcut_for_asi():
-    """`ScenarioResult` accepts `asi` as its 4th field; a caller that omits
-    it (e.g. legacy 3-arg construction) gets the documented `""` default,
-    which is NOT a valid OWASP id -- so a hand-built result missing the tag
-    is distinguishable from a real one, never silently valid."""
-    bare = ScenarioResult("some-legacy-result", True, "ok")
-    assert bare.asi == ""
-    assert not ASI_PATTERN.match(bare.asi)
+def test_scenario_result_requires_asi_no_default_shortcut():
+    """`ScenarioResult.asi` is REQUIRED, with no default: a caller that omits
+    it (e.g. legacy 3-arg construction) must get a `TypeError` at
+    construction time, never a silently-accepted empty/invalid tag."""
+    with pytest.raises(TypeError):
+        ScenarioResult("some-legacy-result", True, "ok")  # missing required `asi`
 
 
 # --- mutation evidence: dropping one tag must be CAUGHT, then reverted -----

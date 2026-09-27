@@ -72,7 +72,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from .. import envelope as env
-from ..authority import Roster
+from ..authority import HUMAN_ROLE, Roster
 from ..channel import ComplianceAgent
 from ..governance_block import GovernanceBlock, sign_governance_block
 from ..grounding import ACTION_NO_STEER, GroundingContext, GroundingResult
@@ -168,11 +168,12 @@ class ScenarioResult:
     # for the why). Never inferred from the name string -- always carried
     # explicitly from the scenario's own definition, so a caller (and
     # `tests/test_conformance_asi_tags.py`) can check it without parsing
-    # prose. Defaults to `""` ONLY so a hand-built `ScenarioResult` in an
-    # existing test (predating this field) keeps constructing with its
-    # original 3 positional args; every `ScenarioResult` `run_conformance`
-    # itself produces always sets a real `ASIxx` id.
-    asi: str = ""
+    # prose. REQUIRED, no default: a hand-built `ScenarioResult` that omits
+    # `asi` must raise `TypeError` at construction time rather than silently
+    # accepting an empty/invalid tag -- every `ScenarioResult` this module
+    # constructs (see `run_conformance` below) always passes a real `ASIxx`
+    # id explicitly.
+    asi: str
 
 
 @dataclass(frozen=True)
@@ -351,7 +352,16 @@ def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> Conform
         for name in ("stage", "approval", "permit", "recorder", "reconciler", "discharger", "certifier")
     }
     trust_store = InMemoryTrustStore()
-    trust_store.add("key-conformance-stage", keys["stage"][1], frozenset({"StageReceipt"}), frozenset({ANY}))
+    # Key-bound identity (commit 5171dec): every StageReceipt this kit issues
+    # is signed by this ONE shared "stage" key/identity regardless of which
+    # role's preflight it stands in for (`_stage_receipts` sets `issuer` to
+    # this exact bound identity for every tool) -- `ANY` role authorization
+    # covers the per-tool `role` field, but the receipt's own self-declared
+    # `issuer` must still equal what this key is actually bound to.
+    trust_store.add(
+        "key-conformance-stage", keys["stage"][1], frozenset({"StageReceipt"}), frozenset({ANY}),
+        identity="conformance:stage",
+    )
     trust_store.add("key-conformance-approval", keys["approval"][1], frozenset({"HumanApprovalReceipt"}), frozenset())
     trust_store.add("key-conformance-permit", keys["permit"][1], frozenset({"ExecutionPermit"}), frozenset())
     trust_store.add("key-conformance-recorder", keys["recorder"][1], frozenset({"ToolReceipt"}), frozenset())
@@ -424,12 +434,18 @@ def _build_plan(kind: str) -> ControlPlan:
 
 
 def _stage_receipts(plan: ControlPlan, stage_signer: Issuer, *, run_id: str, issued_at: datetime, expires_at: datetime) -> list[dict]:
+    """Key-bound identity (commit 5171dec): `issuer` must equal the SIGNING
+    key's bound identity, never a per-role string the key isn't actually
+    bound to -- every receipt here is signed by the one shared
+    `stage_signer`, so `issuer` is that signer's own identity throughout;
+    `role` (the per-tool `TOOL_OWNERS` value, authorized via the stage key's
+    `ANY`-role binding) is the field that still varies per tool."""
     receipts = []
     for name in PREFLIGHT_TOOLS:
         role = TOOL_OWNERS[name]
         base = {
             "schema_version": "1.0.0", "type": "StageReceipt",
-            "issuer": f"issuer:{role}",
+            "issuer": stage_signer.identity,
             "issued_at": issued_at.isoformat(), "expires_at": expires_at.isoformat(),
             "run_id": run_id, "nonce": f"{run_id}:stage:{name}",
             "key_id": stage_signer.key_id, "role": role, "capability": f"tool:{name}",
@@ -1031,7 +1047,13 @@ def _scenario_control_replayed_resume_rejected(ports, recorder, reference, far_f
     comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
     priv, pub = generate_dev_keypair()
     trust_store = InMemoryTrustStore()
-    trust_store.add("key-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}))
+    # Key-bound identity (commit fcb6a22): `from_.actor` must equal the
+    # signing key's bound identity, so this key is bound to `comp_actor`
+    # itself -- otherwise the envelope would be rejected on identity binding
+    # before ever reaching the replay check this scenario exercises.
+    trust_store.add(
+        "key-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}), identity=comp_actor,
+    )
     maker = ControlParticipant(
         session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
         trust_store=trust_store, nonce_store=InMemoryNonceStore(),
@@ -1165,6 +1187,295 @@ def _scenario_self_report_never_satisfies_admission(ports, recorder, reference, 
     )
 
 
+# --- negative scenarios: the identity/channel legs' closed exploits --------
+# (agent-key-signed human approval, approver identity != key identity,
+# maker-signed governance block, envelope actor not bound to key, replayed
+# halt receipt, replayed control envelope with no injected nonce store,
+# receipt scope violation -- see commits 5171dec/fcb6a22 for the underlying
+# fixes each of these exercises).
+
+def _scenario_agent_key_signed_approval_rejected(ports, recorder, reference, far_future, run_id):
+    """An approval receipt for a RESERVED action signed by a key that IS
+    authorized for the `HumanApprovalReceipt` object type but is bound to an
+    AGENT role, never `human` -- self-declaring `approver.role: 'human'`
+    changes nothing, because `verify_human_approval` decides WHO approved
+    off the signing key's own bound role, never the receipt's self-declared
+    field. Closes the exploit where a sender's own agent key could sign its
+    own human approval (commit 5171dec)."""
+    plan = _build_plan(RESERVED_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    agent_priv, agent_pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-agent-approver"
+    identity = f"{run_id}:agent-approver"
+    # Registered on the SHARED ports.trust_store (scoped by a run-unique
+    # key_id) so the plan's own StageReceipts still verify against it too --
+    # never a throwaway store that would also break unrelated verification.
+    ports.trust_store.add(key_id, agent_pub, frozenset({"HumanApprovalReceipt"}), frozenset({"agent"}), identity=identity)
+    issuer = dev_issuer(key_id, identity, agent_priv)
+    approval = _approval(
+        plan, issuer, approver_role=HUMAN_ROLE, run_id=run_id, issued_at=reference, expires_at=far_future,
+    )
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, approval=approval,
+        approver_authority=ports.approver_authority, now=reference,
+    )
+    ok = (
+        admission.decision is AdmissionDecision.REVIEW_REQUIRED
+        and any("not bound to human role" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_approver_identity_mismatch_rejected(ports, recorder, reference, far_future, run_id):
+    """An approval receipt genuinely signed by a key bound to the `human`
+    role, but whose self-declared `approver.id` does NOT equal that key's
+    bound identity (a legitimate human key vouching for a DIFFERENT claimed
+    approver) -- `verify_human_approval` checks the self-declared id
+    against, never substitutes it for, the key-bound one (commit 5171dec)."""
+    plan = _build_plan(RESERVED_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    priv, pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-approver-identity"
+    genuine_identity = f"{run_id}:human-genuine"
+    ports.trust_store.add(key_id, pub, frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}), identity=genuine_identity)
+    issuer = dev_issuer(key_id, genuine_identity, priv)
+    approval = {
+        "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+        "issuer": f"issuer:{issuer.identity}",
+        "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
+        "run_id": run_id, "nonce": f"{run_id}:approval",
+        "key_id": issuer.key_id,
+        # self-declared id does NOT match the key's bound identity above.
+        "approver": {"id": f"{run_id}:human-imposter", "role": HUMAN_ROLE},
+        "permitted_action_digest": plan.action_digest,
+        "scope": "next-action", "reservations": [],
+    }
+    approval["subject_digest"] = canonical.subject_digest(approval)
+    approval["signature"] = issuer.sign(approval)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, approval=approval,
+        approver_authority=ports.approver_authority, now=reference,
+    )
+    ok = (
+        admission.decision is AdmissionDecision.REVIEW_REQUIRED
+        and any("does not match the signing key's bound" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_governance_block_signed_by_maker_refused(ports, recorder, reference, far_future, run_id):
+    """A signed `GovernanceBlock` whose key-bound identity equals the
+    MAKER's own id -- the maker attempting to author its own policy. This
+    must REFUSE admission outright (never REVIEW_REQUIRED, since no human
+    reviewer can repair a forged authority) -- commit 5171dec's fix to
+    `admit()`'s vocabulary for a maker-signed governance block."""
+    plan = _build_plan(NORMAL_KIND)
+    receipts = _stage_receipts(plan, ports.stage_signer, run_id=run_id, issued_at=reference, expires_at=far_future)
+    policy_author_role = "policy-author"
+    maker_priv, maker_pub = generate_dev_keypair()
+    key_id = f"key-{run_id}-maker-as-author"
+    ports.trust_store.add(
+        key_id, maker_pub, frozenset({"GovernanceBlock"}), frozenset({policy_author_role}), identity=plan.maker_id,
+    )
+    issuer = dev_issuer(key_id, plan.maker_id, maker_priv)
+    signed = sign_governance_block(GOVERNANCE, key_id=issuer.key_id, identity=issuer.identity, sign=issuer.sign)
+    admission = admit(
+        plan, receipts, governance=GOVERNANCE, trust_store=ports.trust_store,
+        revocation_store=ports.revocation_store, signed_governance_block=signed,
+        policy_author_role=policy_author_role, now=reference,
+    )
+    ok = (
+        admission.decision is AdmissionDecision.REFUSED
+        and any("signed by the maker" in r for r in admission.reasons)
+    )
+    return ok, f"decision={admission.decision.value}, reasons={admission.reasons}"
+
+
+def _scenario_control_actor_identity_mismatch_rejected(ports, recorder, reference, far_future, run_id):
+    """A control envelope signed by a REGISTERED key, legitimately trusted
+    for `A2AControlMessage`/`policy-compliance`, but bound to a DIFFERENT
+    identity than the envelope's own claimed `from_.actor` -- a spoofed
+    sender name riding a real key that belongs to someone else. Distinct
+    from `control_forged_sender_rejected` (an entirely UNREGISTERED key):
+    this is commit fcb6a22's key-bound-identity check on `from_.actor`
+    itself."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-other-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+        identity=f"{run_id}:someone-else",
+    )
+    maker = ControlParticipant(
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, nonce_store=InMemoryNonceStore(),
+        state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),  # claims to BE comp_actor
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.HOLD, body=env.hold_body("next-action"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    spoofed = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-other-comp",
+        sign=lambda d: dev_sign_subject(d, priv), nonce=f"{run_id}:nonce",
+    )
+    maker.inbox.put(maker_id, spoofed)
+    responses = maker.checkpoint()
+    ok = (
+        len(responses) == 1 and responses[0].verb is Verb.ACK
+        and responses[0].body.get("accepted") is False and maker.is_held() is False
+    )
+    return ok, (
+        f"responses={[(r.verb.value, r.body.get('accepted')) for r in responses]}, "
+        f"held={maker.is_held()}"
+    )
+
+
+def _scenario_replayed_halt_receipt_rejected(ports, recorder, reference, far_future, run_id):
+    """A genuinely valid, single-use halt approval receipt dispatches once;
+    presenting the IDENTICAL receipt a second time must be rejected --
+    commit fcb6a22's `(run_id, nonce)` consumption on `ComplianceAgent.
+    halt()`, distinct from the permit-replay vector and from the plain
+    control-envelope replay vector."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    approver_priv, approver_pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    approver_identity = f"{run_id}:human-approver"
+    trust_store.add(
+        "key-halt-approver", approver_pub, frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}),
+        identity=approver_identity,
+    )
+    comp = ComplianceAgent(
+        session_id=comp_actor, role="policy-compliance", inbox=_InMemoryInbox(),
+        roster=Roster(), trust_store=trust_store,
+    )
+    reason_ref = f"{run_id}:reason"
+    digest = env.halt_digest(comp_actor, maker_id, reason_ref)
+    approval = {
+        "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+        "issuer": f"issuer:{approver_identity}",
+        "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
+        "run_id": run_id, "nonce": f"{run_id}:halt-approval",
+        "key_id": "key-halt-approver",
+        "approver": {"id": approver_identity, "role": HUMAN_ROLE},
+        "permitted_action_digest": digest,
+        "scope": "next-action", "reservations": [],
+    }
+    approval["subject_digest"] = canonical.subject_digest(approval)
+    approval["signature"] = dev_sign_subject(approval, approver_priv)
+
+    first = comp.halt(maker_id, reason_ref=reason_ref, approval=approval, now=reference)
+    second = comp.halt(maker_id, reason_ref=reason_ref, approval=approval, now=reference)
+    ok = (
+        first.dispatched is True
+        and second.dispatched is False
+        and second.denied_reason is not None
+        and "already been used" in second.denied_reason
+    )
+    return ok, (
+        f"first dispatched={first.dispatched}, second dispatched={second.dispatched}, "
+        f"second reason={second.denied_reason!r}"
+    )
+
+
+def _scenario_control_replay_without_injected_nonce_store_rejected(ports, recorder, reference, far_future, run_id):
+    """A `ControlParticipant` constructed in AUTHENTICATED mode (a
+    `trust_store` configured) WITHOUT the caller injecting its own
+    `nonce_store` at all -- commit fcb6a22's fail-closed default
+    (`__post_init__` defaults to a durable `FileNonceStore` rather than
+    leaving `nonce_store` `None`) must still catch the identical signed
+    envelope delivered twice; the earlier fail-open gap silently skipped
+    this check entirely when no nonce store was configured."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    priv, pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    trust_store.add(
+        "key-no-nonce-comp", pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+        identity=comp_actor,
+    )
+    maker = ControlParticipant(  # deliberately no nonce_store= passed
+        session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,
+        trust_store=trust_store, state_provider=lambda include: {},
+    )
+    msg = env.new_message(
+        from_=Party(actor=comp_actor, role="policy-compliance"),
+        to=Party(actor=maker_id, role="maker"),
+        verb=Verb.HOLD, body=env.hold_body("next-action"),
+        authority=ControlAuthority(basis="role", role="policy-compliance", oversees=maker_id, reserved=False),
+    )
+    wire_msg = env.stamp_and_sign(
+        env.to_wire(msg), key_id="key-no-nonce-comp",
+        sign=lambda d: dev_sign_subject(d, priv), nonce=f"{run_id}:fixed-nonce",
+    )
+    maker.inbox.put(maker_id, wire_msg)
+    first = maker.checkpoint()
+    maker.inbox.put(maker_id, wire_msg)  # the identical envelope, delivered again
+    second = maker.checkpoint()
+    ok = (
+        maker.nonce_store is not None
+        and len(first) == 1 and first[0].body.get("accepted") is True
+        and len(second) == 1 and second[0].body.get("accepted") is False
+        and "replay" in (second[0].body.get("note") or "")
+    )
+    return ok, (
+        f"nonce_store_defaulted={maker.nonce_store is not None}, "
+        f"first accepted={first[0].body.get('accepted')}, second accepted={second[0].body.get('accepted')}, "
+        f"note={second[0].body.get('note')!r}"
+    )
+
+
+def _scenario_halt_receipt_scope_violation_rejected(ports, recorder, reference, far_future, run_id):
+    """A genuinely valid, human-signed halt approval receipt whose `scope`
+    is NOT one of the recognized values must be rejected. The schema's own
+    `scope` enum currently mirrors `channel.HALT_APPROVAL_SCOPES` exactly,
+    so an out-of-enum value is caught at schema validation (inside
+    `verify_human_approval`'s own `verify()` call) before `channel.py`'s
+    explicit defense-in-depth scope check ever runs -- this scenario
+    asserts the receipt is rejected and the denial names the scope, not
+    which specific layer caught it (both are the real fcb6a22 guarantee:
+    an unrecognized scope can never authorise a halt)."""
+    comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
+    approver_priv, approver_pub = generate_dev_keypair()
+    trust_store = InMemoryTrustStore()
+    approver_identity = f"{run_id}:human-approver"
+    trust_store.add(
+        "key-scope-approver", approver_pub, frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}),
+        identity=approver_identity,
+    )
+    comp = ComplianceAgent(
+        session_id=comp_actor, role="policy-compliance", inbox=_InMemoryInbox(),
+        roster=Roster(), trust_store=trust_store,
+    )
+    reason_ref = f"{run_id}:reason"
+    digest = env.halt_digest(comp_actor, maker_id, reason_ref)
+    approval = {
+        "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+        "issuer": f"issuer:{approver_identity}",
+        "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
+        "run_id": run_id, "nonce": f"{run_id}:scope-approval",
+        "key_id": "key-scope-approver",
+        "approver": {"id": approver_identity, "role": HUMAN_ROLE},
+        "permitted_action_digest": digest,
+        "scope": "whenever-i-feel-like-it",  # not in HALT_APPROVAL_SCOPES
+        "reservations": [],
+    }
+    approval["subject_digest"] = canonical.subject_digest(approval)
+    approval["signature"] = dev_sign_subject(approval, approver_priv)
+
+    result = comp.halt(maker_id, reason_ref=reason_ref, approval=approval, now=reference)
+    ok = (
+        result.dispatched is False
+        and result.denied_reason is not None
+        and "scope" in result.denied_reason
+        and "whenever-i-feel-like-it" in result.denied_reason
+    )
+    return ok, f"dispatched={result.dispatched}, denied_reason={result.denied_reason!r}"
+
+
 # Scenarios whose PASS jointly evidences "bypass is tested and rejected"
 # (plan: 'Outcome' -- the mediated grade). Admission-only vectors (prohibited/
 # reserved/ready-alone/non-admitted-permit) and certification-honesty vectors
@@ -1281,6 +1592,41 @@ _NEGATIVE_SCENARIOS: tuple[tuple[str, Callable, str], ...] = (
     # if it could satisfy an admission receipt, would poison the
     # governance decision with attacker-influenced, unwitnessed content.
     ("self_report_never_satisfies_admission", _scenario_self_report_never_satisfies_admission, "ASI06"),
+    # ASI09 Human-Agent Trust Exploitation -- a sender's own agent key,
+    # never bound to a human role, signing its own "human" approval is
+    # exploiting the reserved-act gate's trust in the HumanApprovalReceipt
+    # object type as if it were trust in an actual human.
+    ("agent_key_signed_approval_rejected", _scenario_agent_key_signed_approval_rejected, "ASI09"),
+    # ASI03 Identity and Privilege Abuse -- a genuinely human-role key
+    # vouching for a DIFFERENT self-declared approver identity than the one
+    # it is actually bound to is an identity-substitution privilege grab.
+    ("approver_identity_mismatch_rejected", _scenario_approver_identity_mismatch_rejected, "ASI03"),
+    # ASI03 Identity and Privilege Abuse -- a maker authoring and signing
+    # its own governance block is claiming the policy-author's authority
+    # for itself, the paradigmatic privilege escalation this leg closes.
+    ("governance_block_signed_by_maker_refused", _scenario_governance_block_signed_by_maker_refused, "ASI03"),
+    # ASI03 Identity and Privilege Abuse -- a real, registered key signing
+    # as a DIFFERENT claimed sender than the identity it is actually bound
+    # to is a sender-identity substitution on the control channel itself.
+    ("control_actor_identity_mismatch_rejected", _scenario_control_actor_identity_mismatch_rejected, "ASI03"),
+    # ASI07 Insecure Inter-Agent Communication -- replaying an
+    # already-consumed halt approval receipt is a message-replay attack
+    # against the reserved-act approval channel, distinct from the
+    # permit-replay and control-envelope-replay vectors above.
+    ("replayed_halt_receipt_rejected", _scenario_replayed_halt_receipt_rejected, "ASI07"),
+    # ASI07 Insecure Inter-Agent Communication -- a control participant
+    # constructed with no injected nonce store at all must still catch a
+    # replayed envelope via its own fail-closed default, never silently
+    # skip the check for lack of an explicit store.
+    (
+        "control_replay_without_injected_nonce_store_rejected",
+        _scenario_control_replay_without_injected_nonce_store_rejected, "ASI07",
+    ),
+    # ASI09 Human-Agent Trust Exploitation -- a genuinely human-signed halt
+    # receipt carrying an unrecognized scope is exploiting the human's
+    # trust boundary by claiming a broader/other authorization than any
+    # human actually granted.
+    ("halt_receipt_scope_violation_rejected", _scenario_halt_receipt_scope_violation_rejected, "ASI09"),
 )
 
 

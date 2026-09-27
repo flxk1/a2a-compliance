@@ -119,10 +119,16 @@ def test_mutation_neutering_the_forged_sender_check_would_be_caught():
     comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
     forger_priv, forger_pub = generate_dev_keypair()
     neutered_trust_store = InMemoryTrustStore()
-    # MUTATION: the forger's own key IS registered here -- the real
-    # scenario function never does this; this simulates a neutered check.
+    # MUTATION: the forger's own key IS registered here (with a bound
+    # identity matching the claimed sender too, so this mutation isolates
+    # ONLY "an unregistered key is never trusted" -- the real scenario
+    # function never registers the forger's key at all; commit fcb6a22's
+    # separate key-bound-identity check stays intact and would otherwise
+    # also catch an identity-less binding, masking what this mutation means
+    # to demonstrate).
     neutered_trust_store.add(
         "key-forger", forger_pub, frozenset({"A2AControlMessage"}), frozenset({"policy-compliance"}),
+        identity=comp_actor,
     )
     maker = ControlParticipant(
         session_id=maker_id, inbox=_InMemoryInbox(), compliance_actor=comp_actor,

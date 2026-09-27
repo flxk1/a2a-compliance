@@ -69,6 +69,18 @@ def test_run_conformance_positive_and_every_negative_vector_pass():
         "fabricated_discharge_not_certified",
         "foreign_executor_rejected",
         "missing_proof_rejected",
+        "control_forged_sender_rejected",
+        "control_replayed_resume_rejected",
+        "control_unapproved_halt_not_dispatched",
+        "tampered_governance_block_not_admitted",
+        "self_report_never_satisfies_admission",
+        "agent_key_signed_approval_rejected",
+        "approver_identity_mismatch_rejected",
+        "governance_block_signed_by_maker_refused",
+        "control_actor_identity_mismatch_rejected",
+        "replayed_halt_receipt_rejected",
+        "control_replay_without_injected_nonce_store_rejected",
+        "halt_receipt_scope_violation_rejected",
     }
 
 
@@ -101,6 +113,18 @@ def test_each_negative_scenario_is_individually_observed_to_fail_closed():
         "fabricated_discharge_not_certified",
         "foreign_executor_rejected",
         "missing_proof_rejected",
+        "control_forged_sender_rejected",
+        "control_replayed_resume_rejected",
+        "control_unapproved_halt_not_dispatched",
+        "tampered_governance_block_not_admitted",
+        "self_report_never_satisfies_admission",
+        "agent_key_signed_approval_rejected",
+        "approver_identity_mismatch_rejected",
+        "governance_block_signed_by_maker_refused",
+        "control_actor_identity_mismatch_rejected",
+        "replayed_halt_receipt_rejected",
+        "control_replay_without_injected_nonce_store_rejected",
+        "halt_receipt_scope_violation_rejected",
     ):
         assert by_name[name].passed, (name, by_name[name].detail)
 
@@ -204,8 +228,8 @@ def test_no_alternate_path_attestation_without_bypass_rejected_stays_advisory():
     # failure (or an untested bypass, which counts the same as a failure).
     bypassable_report = ConformanceReport(
         scenarios=(
-            ScenarioResult("positive_full_run_certifies", True, "ok"),
-            ScenarioResult("bypass_missing_permit_rejected", False, "effect happened without a permit"),
+            ScenarioResult("positive_full_run_certifies", True, "ok", asi="ASI10"),
+            ScenarioResult("bypass_missing_permit_rejected", False, "effect happened without a permit", asi="ASI05"),
         ),
         bypass_rejected=False,
     )
