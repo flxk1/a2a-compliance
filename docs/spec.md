@@ -137,7 +137,11 @@ description.
   "body": { ... },                     // verb-specific
   "authority": { ... },                // see §5 — how this message is authorized
   "grounding": { ... } | null,         // see §4 — the grounded criterion, if any
-  "enforcement": { ... } | null        // see §6 — external enforcement verdict/receipt, if any
+  "enforcement": { ... } | null,       // see §6 — external enforcement verdict/receipt, if any
+  "nonce": "<token>",                  // authenticated mode only (§3.5)
+  "expires_at": "<rfc3339>",           // authenticated mode only (§3.5)
+  "key_id": "<id>",                    // authenticated mode only (§3.5)
+  "signature": "<base64 Ed25519>"      // authenticated mode only (§3.5)
 }
 ```
 
@@ -146,6 +150,9 @@ description.
 - A receiver **MUST** ignore unknown envelope fields (forward-compatibility) and
   **MUST NOT** treat a `null` `grounding`/`enforcement` as a failure — absence of
   an enrichment plane is a valid state, not an error.
+- `nonce`, `expires_at`, `key_id` and `signature` are present only on an envelope
+  signed for authenticated mode and are omitted, never `null`, on a bare envelope
+  (§3.5).
 
 ### 3.2 compliance → maker verbs
 
@@ -163,7 +170,9 @@ description.
 - **`halt` is a reserved act in every mode.** Irreversible fleet-level steers are
   surfaced to the human for confirmation regardless of loomground/external enforcement presence,
   per the ctrl oversight rules. External enforcement, when present, additionally gates it; its
-  absence does not lower the bar.
+  absence does not lower the bar. In bare mode the confirmation is `confirm=True`, an
+  advisory assertion; in authenticated mode it is a verified `HumanApprovalReceipt`
+  (§3.5).
 
 ### 3.3 maker → compliance verbs
 
@@ -185,6 +194,34 @@ Every verb is **total in mode (a)**: it has a complete, useful meaning with
 neither loomground nor external enforcement. `grounding` and `enforcement` are additive envelope
 planes; a receiver that sees them `null` behaves exactly as the bare protocol
 specifies.
+
+### 3.5 Authenticated and bare modes
+
+The channel runs in one of two modes, set by whether a `TrustStore` is
+configured; this is independent of the grounding/enforcement modes of §2.
+
+- **Bare mode** (no `TrustStore`; the default). Envelopes are unsigned. The
+  maker applies any well-formed envelope and answers each honoured message with
+  `mode: "advisory"` in its response body: nothing about the sender is
+  authenticated. `halt` dispatches on `confirm=True`.
+- **Authenticated mode** (`TrustStore` configured). The sender stamps a fresh
+  `nonce`, an `expires_at` and its `key_id`, and signs the envelope with Ed25519
+  over the DSSE PAE of its RFC 8785 canonical subject
+  (`envelope.stamp_and_sign`, `wire/signing.py`). The maker applies an envelope
+  only when its key resolves in the `TrustStore`, is bound to `A2AControlMessage`
+  and the sender's role, the signature verifies, the envelope has not expired,
+  the `(sender, nonce)` pair is new to the injected `NonceStore` (when one is
+  injected), and `authorize()` allows the verb. Any other envelope is never
+  applied and is answered `ack{accepted: false}` with the reason; an applied one
+  is answered `mode: "authenticated"`. Without the `crypto` extra the maker
+  rejects every envelope. A `halt` dispatches only with a `HumanApprovalReceipt`
+  that verifies, whose `permitted_action_digest` equals `envelope.halt_digest`
+  over the halt's sender, maker and `reason_ref`, and whose approver has role
+  `human` and is neither the sender nor the maker; `confirm=True` alone does not
+  dispatch.
+
+`FileInbox` creates message files, their temporary files and sequence-claim
+files with mode 0600 in both modes.
 
 ---
 
@@ -282,7 +319,8 @@ maker*. It is independent of the channel (§1, Axis B).
 - Authority derives from the roster: a compliance role may `query-state`,
   `issue-directive`, `hold`, `resume` a maker it oversees. `halt` is a **reserved
   act** surfaced to the human (charter oversight rule: *the team never decides
-  over the human's head*).
+  over the human's head*); in authenticated mode it needs a verified
+  human-approval receipt bound to that halt (§3.5).
 - This is the **only** hard-required authority substrate. It needs neither
   loomground nor external enforcement.
 
@@ -333,6 +371,25 @@ The `enforcement` envelope block in mode (c):
                  "audit_id": "<id|null>", "advisory": true|false }
 ```
 
+### 6.1 The package's own mediated path
+
+Separately from an external adapter, `a2a_compliance.wire` mediates effects routed
+through `wire.consume_and_execute`. Two properties of that path bear on the
+channel and the governance block:
+
+- **Sender-constrained permit.** `wire.issue_permit` accepts `aud` and `cnf`
+  only together (RFC 7800 confirmation; `cnf.jkt` is the RFC 7638 thumbprint of
+  the executor's Ed25519 key). A permit carrying either executes only when the
+  calling executor's identity equals `aud` and it presents an Ed25519 proof of
+  possession, by the key `cnf.jkt` names, over the permit's `subject_digest` and
+  nonce; otherwise it produces no effect and its nonce stays unspent.
+- **Conformance scenarios.** `wire.run_conformance` checks, among others, a
+  forged control sender, a replayed `resume`, a halt without approval, a
+  tampered governance block, a foreign executor, a missing proof of possession
+  and a maker self-report offered as an admission receipt. Each scenario result
+  carries an OWASP Agentic AI Top 10 (2026) id (`ASI01`–`ASI10`) in
+  `ScenarioResult.asi`.
+
 ---
 
 ## 7. Governance-block seam — steering within the declared boundary
@@ -358,6 +415,15 @@ consumes the block; it does not redefine it.**
 - The block is itself **universal / vendor-neutral** — the same ethos as this
   protocol (see §10). The seam is: *A2A directive ⊆ the maker's declared
   governance boundary.*
+- **Pinned block.** A maker's self-declared block can be pinned by a distinct
+  policy author: `GovernanceBlock.digest()` is the RFC 8785 digest of the
+  boundary, and `sign_governance_block` signs it. Given the resulting
+  `SignedGovernanceBlock`, `wire.admit` refuses admission when the block in
+  force does not hash to the signed digest, when the signer is the maker, or
+  when the signing key is not bound in the `TrustStore` to `GovernanceBlock` and
+  the policy-author role; on success the permit carries
+  `governance_block_digest`. Without a signed block, admission reads the
+  self-declared block unpinned.
 
 ---
 

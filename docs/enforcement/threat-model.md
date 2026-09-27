@@ -1,10 +1,17 @@
 # E0 threat model — enforcement wire contracts
 
-Scope: `a2a_compliance/wire/`. Contracts and a pure verifier only. No signature
-verification (E1), no admission decision (E2), no dispatch (E3), no
-observation/certification (E4). This document is prose distilled from the
-enforcement-layer plan's "Fixed trust boundary", "Wire contracts" and "State
-machine" sections; it does not restate the full plan.
+Scope: `a2a_compliance/wire/` and the A2A control channel
+(`a2a_compliance/envelope.py`, `channel.py`, `participant.py`, `inbox.py`).
+This document began as the E0 threat model (contracts and a pure verifier) and
+is prose distilled from the enforcement-layer plan's "Fixed trust boundary",
+"Wire contracts" and "State machine" sections; it does not restate the full
+plan. The stages E0 deferred now exist in the package: signature verification
+and revocation (E1: `wire/signing.py`, `wire/trust.py`, `wire/verification.py`),
+admission (E2: `wire/admission.py`), mediated execution (E3: `wire/executor.py`)
+and reconciliation and certification (E4: `wire/reconciliation.py`,
+`wire/certification.py`). The attack table below names where each mitigation
+now lives. "Guarantees added after E0" records the control-channel and
+permit hardening, and "Open items" what is still not built.
 
 ## Assets
 
@@ -41,20 +48,26 @@ must not satisfy two of these roles in the same run:
 E0 does not enforce this separation (role bindings are deployment
 configuration per the plan); it is named here so E1's trust-role binding and
 E2's admission logic have a fixed vocabulary to enforce against, and so a
-reviewer of a deployment's role config knows what to check.
+reviewer of a deployment's role config knows what to check. Later stages
+enforce parts of it: a pinned governance block must be signed by an identity
+other than the maker (`wire/admission.py`, `_governance_block_findings`), a
+halt approver must be a `human` identity other than the sender and the maker
+(`channel.py`, `ComplianceAgent._verify_halt_approval`), and the certifying
+identity must differ from the permit issuer, the reconciler, the tool executors
+and the approver (`wire/certification.py`).
 
 ## Attack paths (first threat model; plan-named)
 
 | Attack | E0 mitigation | What E0 does *not* cover |
 |---|---|---|
-| **Forged receipt** | Schema validation rejects malformed shape; `subject_digest` recompute rejects any receipt whose claimed digest doesn't match its own canonical content. | Whether the `signature` over that digest is valid, or came from a trusted `key_id` — E1. |
+| **Forged receipt** | Schema validation rejects malformed shape; `subject_digest` recompute rejects any receipt whose claimed digest doesn't match its own canonical content. | Whether the `signature` over that digest is valid, or came from a trusted `key_id`. Covered in E1: when a `TrustStore` is passed, `wire.verification.verify` resolves `key_id`, checks the key is bound to the object type (and, for a `StageReceipt`, the role), and verifies the Ed25519 signature over the DSSE PAE of the canonical subject (`wire/signing.py`, `wire/trust.py`). |
 | **Altered context** | Any change to a signed object's fields changes its canonical bytes and therefore its digest; a `ContextManifest` bound into a later object by digest cannot be silently swapped without that binding breaking. | E0 does not itself verify that a *consumer* actually checks the binding — that is E2 admission logic. |
-| **Replay** | `NonceStore` port scoped by `(run_id, nonce)`; a second `verify()` of any object sharing a previously-consumed pair is rejected. | E0's `InMemoryNonceStore` is test-only and non-durable; a host needs a durable store, and atomic pre-dispatch consumption is E3. |
+| **Replay** | `NonceStore` port scoped by `(run_id, nonce)`; a second `verify()` of any object sharing a previously-consumed pair is rejected. | E0's `InMemoryNonceStore` is test-only and non-durable; a host needs a durable store. Atomic pre-dispatch consumption is built in E3: `wire.executor.consume_and_execute` spends the permit nonce through `NonceStore.consume`, a single compare-and-set. |
 | **Confused deputy** | `ToolReceipt.tool` is the *actual* tool invoked (not the nominally requested one), and `ToolReceipt.executor` is a distinct principal from the requester — both are visible on the wire for a later comparison. | E0 does not perform that comparison; that is reconciliation logic (E4) over these receipts. |
 | **Stale policy** | `expires_at` staleness check rejects any object presented past its own expiry. | E0 has no concept of a *policy's* freshness independent of the object's own `expires_at` — that is `norm-freshness` (E4-adjacent repo). |
 | **Partial execution** | `ToolReceipt` carries `started_at`/`ended_at` per call, and `dispatch_id` binds multiple `ToolReceipt`s to one `ControlReceipt`; a caller can see the receipt set is incomplete. | E0 does not decide completeness or certify — E4. |
 | **Adapter bypass** | `ExecutionPermit.enforcement_grade` is a first-class, explicit field: an adapter that cannot prevent an out-of-band call must not claim `mediated`/`platform`. | E0 does not test whether a running adapter's claimed grade is true — that is `enforcement-posture` / E3's deployment test. |
-| **Key compromise** | `Revocation` schema exists for `key`/`policy`/`permit`/`run` plus an effective time. | E0 does not check a `Revocation` against anything (no revocation-list consumption); that wiring is E1/E2. |
+| **Key compromise** | `Revocation` schema exists for `key`/`policy`/`permit`/`run` plus an effective time. | E0 does not check a `Revocation` against anything. Covered in E1: when a `RevocationStore` is passed, `wire.verification.verify` rejects an object whose `key_id`, `run_id`, permit digest or (for a `ContextManifest`) policy bundle is revoked as of the reference time (`wire/trust.py`, `wire/verification.py`); admission, execution, reconciliation and certification pass their store through. The control-channel envelope check does not consult a `RevocationStore`. |
 
 E0 explicitly does not claim protection against a fully compromised host, per
 the plan.
@@ -79,8 +92,9 @@ tested at E3/E5.
 `a2a-compliance` (this repository, including `wire/`) never:
 
 - dispatches, kills, erases, or activates policy;
-- uses a production signing key (E0 treats `signature` as an opaque string;
-  no key material exists in this package);
+- uses a production signing key (signing goes through a host-injected
+  `Issuer`; `wire.admission.dev_issuer` and `wire.signing.dev_sign_subject` are
+  test-only, and no key material is packaged);
 - fabricates human approval (a `HumanApprovalReceipt` is only ever consumed
   here, never synthesised).
 
@@ -94,10 +108,89 @@ authority signal.
 E0 never issues an `ExecutionPermit` — it defines the permit's *schema*, not
 its issuance, which is E2 scope.
 
-## Open items carried into E1/E2 (not decided here)
+## Guarantees added after E0
+
+Each is opt-in: a caller that configures none of it gets the earlier behaviour.
+
+1. **Authenticated control channel** (`envelope.py`, `participant.py`,
+   `channel.py`). A `ComplianceAgent` with a `trust_store` and a `signer`
+   stamps every outbound envelope with `nonce`, `expires_at` (default 300
+   seconds ahead) and `key_id`, and signs it through `wire/signing.py`
+   (`envelope.stamp_and_sign`). A `ControlParticipant` with a `trust_store`
+   honours an envelope only if its `key_id` resolves, the key is bound to
+   `A2AControlMessage` and to the sender's claimed role, the Ed25519 signature
+   verifies, `expires_at` is in the future, the `(sender, nonce)` pair has not
+   been seen by the injected `NonceStore`, and `authorize()` allows the
+   sender's role the verb. A rejected envelope is never applied; the maker
+   answers `ack{accepted: false}` with the reason. Without the `crypto` extra
+   an authenticated participant rejects every envelope. Without a
+   `trust_store` (bare mode) envelopes are unsigned, and every honoured message
+   is answered with `mode: "advisory"`.
+2. **Approval-gated halt** (`channel.py`, `ComplianceAgent.halt`). With a
+   `trust_store` configured, `confirm=True` no longer dispatches a halt. The
+   halt dispatches only with a `HumanApprovalReceipt` that verifies through
+   `wire.verification.verify` against the agent's `trust_store` (signature,
+   trust binding, expiry; revocation and replay when the agent also has a
+   `revocation_store` and a `nonce_store`), whose `permitted_action_digest` equals `envelope.halt_digest`
+   over this halt's sender, maker and `reason_ref`, and whose approver has
+   role `human` and an id other than the sender and the maker. Otherwise the
+   halt is surfaced to the human and not sent. In bare mode `confirm=True`
+   remains an advisory gate with no cryptographic binding.
+3. **Sender-constrained permit** (`wire/admission.py`, `wire/executor.py`,
+   `wire/signing.py`). `issue_permit` takes `aud` and `cnf` together (RFC 7800
+   confirmation; `cnf.jkt` is the RFC 7638 thumbprint of the executor's
+   Ed25519 key) and refuses either alone. When a permit carries either field,
+   `consume_and_execute` requires `executor_identity == aud` and a proof of
+   possession: an Ed25519 signature by the key `cnf.jkt` names over the DSSE
+   PAE of the canonical `{permit_id, nonce}`, where `permit_id` is the
+   permit's `subject_digest`. A mismatch or a missing or invalid proof
+   produces no effect and leaves the nonce unspent.
+4. **Pinned governance block** (`governance_block.py`, `wire/admission.py`).
+   `GovernanceBlock.digest()` is the RFC 8785 digest of the block's boundary;
+   `sign_governance_block` has a policy author sign it. Given a
+   `SignedGovernanceBlock`, `admit()` refuses admission when the block in
+   force does not hash to the signed digest, when the signer is the plan's
+   maker, or when the signing key is not bound in the `TrustStore` to
+   `GovernanceBlock` and the policy-author role (`policy-author` by default),
+   or its signature fails. On success the digest is carried into the permit
+   as `governance_block_digest`. `consume_and_execute` does not re-check it.
+
+Control-channel files: `FileInbox` creates message files, their temporary
+files and sequence-claim files with mode 0600 (`inbox.py`).
+
+The conformance kit (`wire/conformance_kit.py`) exercises these guarantees:
+`foreign_executor_rejected` and `missing_proof_rejected` for the permit,
+`control_forged_sender_rejected`, `control_replayed_resume_rejected` and
+`control_unapproved_halt_not_dispatched` for the channel,
+`tampered_governance_block_not_admitted` for the pin, and
+`self_report_never_satisfies_admission` for a maker's self-report. Every
+scenario carries an OWASP Agentic AI Top 10 (2026) id (`ASI01`-`ASI10`) in
+`ScenarioResult.asi`. None of these scenarios changes how `Profile` grades a
+deployment.
+
+## Open items
 
 - Trust-root and role-binding configuration format (plan: "deployment
-  configuration, never embedded as trusted payload data").
-- DSSE/Ed25519 signature verification over `signature`.
-- Whether/how a `Revocation` is consulted during verification (E0's
-  `verify()` has no revocation-list parameter).
+  configuration, never embedded as trusted payload data"). The package ships
+  only the `TrustStore`/`RevocationStore`/`NonceStore` ports and test-only
+  in-memory implementations; a host supplies durable ones.
+- Full DSSE envelopes and in-toto attestations. Signatures use the DSSE PAE
+  construction over the canonical subject, but no object is wrapped in a DSSE
+  envelope or emitted as an in-toto statement, and the `DSSE_PAYLOAD_TYPE`
+  string is not yet aligned with other consumers.
+- A transparency log for signed objects; `wire.audit_chain_verify` detects
+  removal, reorder or mutation within a chain the host already holds, but
+  nothing is published to an append-only log.
+- Standard token profiles for the permit (for example a JWT or CWT encoding
+  with DPoP); `aud`/`cnf` follow RFC 7800 semantics on this package's own
+  wire format.
+- An AuthZEN-style authorization decision interface; `authorize()` and the
+  approver port are package-local.
+- A binding to the A2A protocol's own transport and agent cards; the control
+  channel runs over `FileInbox` or the opt-in harness transport.
+- Control-channel limits: the envelope check does not consult a
+  `RevocationStore`; replay is checked only when a `NonceStore` is injected,
+  through its non-atomic `seen`/`record` pair; a `ComplianceAgent` with a
+  `trust_store` but no `signer` sends unsigned envelopes, which an
+  authenticated participant rejects; the mailbox directories and the
+  `.cursor` file follow the process umask.
