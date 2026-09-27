@@ -60,11 +60,11 @@ out: edit   decision=steer        dispatched=True  verb=issue-directive
 
 ## Family
 
-Runtime controls. `ComplianceTeam` assigns the 42 repositories to eight roles. Optional to both profiles; LOOMGROUND degrades an absent one to a human route. Consumed by [loomground-mcp](https://github.com/flxk1/loomground-mcp), serving `compliance-fleet`. Catalogue: [CATALOGUE.json](https://github.com/flxk1/loomground/blob/main/CATALOGUE.json).
+Runtime controls. `ComplianceTeam` assigns the 43 repositories to eight roles. Optional to both profiles; LOOMGROUND degrades an absent one to a human route. Consumed by [loomground-mcp](https://github.com/flxk1/loomground-mcp), serving `compliance-fleet`. Catalogue: [CATALOGUE.json](https://github.com/flxk1/loomground/blob/main/CATALOGUE.json).
 
 ## Status
 
-305 tests · Python >=3.10 · latest tagged release 0.4.0
+311 tests · Python >=3.10 · latest tagged release 0.4.0
 
 `main` carries the whole enforcement chain: admission over verified stage receipts, single-use signed execution permits, mediated execution in which a replayed, tampered, expired or revoked permit produces no effect, postflight reconciliation of observed effects against the permit, and an oversight certificate issued only when every check passes and the certifier is a distinct identity from the issuer, the executors, the reconciler and the approver. The 0.4.0 tag predates that chain, which is recorded under `Unreleased` in the [CHANGELOG](CHANGELOG.md).
 

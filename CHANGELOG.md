@@ -71,6 +71,18 @@ effect digest it is handed, and the absence of an import of the plane -- so a
 later consolidation of the comparison into the lifecycle fails the suite. No
 public signature changed.
 
+### Fixed
+
+The compliance manifest omitted `loomground-composition`, a published family
+repository. It is now assigned to `conductor` as an optional contract, and the
+manifest assigns all 43 public family repositories exactly once.
+`a2a_compliance/family.py`, mirrored in `family.json`, records the family list
+the assignment is checked against, and `tests/test_family_assignment.py` fails
+on a family repository left unassigned or assigned twice. README.md, llms.txt
+and `docs/compliance-team.md` had stated three different repository counts;
+each now states 43, and `tests/test_readme_claims.py` derives the count from
+`COMPLIANCE_ROLES` and holds all three documents to it.
+
 ## 0.4.0
 
 Signed receipt chain. Receipts are signed with Ed25519 over the same canonical
