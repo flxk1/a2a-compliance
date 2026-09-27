@@ -208,17 +208,24 @@ configured; this is independent of the grounding/enforcement modes of §2.
   `nonce`, an `expires_at` and its `key_id`, and signs the envelope with Ed25519
   over the DSSE PAE of its RFC 8785 canonical subject
   (`envelope.stamp_and_sign`, `wire/signing.py`). The maker applies an envelope
-  only when its key resolves in the `TrustStore`, is bound to `A2AControlMessage`
-  and the sender's role, the signature verifies, the envelope has not expired,
-  the `(sender, nonce)` pair is new to the injected `NonceStore` (when one is
-  injected), and `authorize()` allows the verb. Any other envelope is never
-  applied and is answered `ack{accepted: false}` with the reason; an applied one
-  is answered `mode: "authenticated"`. Without the `crypto` extra the maker
-  rejects every envelope. A `halt` dispatches only with a `HumanApprovalReceipt`
-  that verifies, whose `permitted_action_digest` equals `envelope.halt_digest`
-  over the halt's sender, maker and `reason_ref`, and whose approver has role
-  `human` and is neither the sender nor the maker; `confirm=True` alone does not
-  dispatch.
+  only when its key resolves in the `TrustStore`, is bound to `A2AControlMessage`,
+  the sender's role and an identity (`TrustBinding.identity`) equal to the
+  envelope's `from_.actor`, the signature verifies, the envelope has not expired,
+  the `(sender, nonce)` pair is new to the `NonceStore`, and `authorize()` allows
+  the verb. The replay check is never skipped: without an injected `nonce_store`
+  the maker and the compliance agent use a durable, file-backed
+  `FileNonceStore` under the inbox root, and with no store at all the envelope
+  is rejected. Any other envelope is never applied and is answered
+  `ack{accepted: false}` with the reason; an applied one is answered
+  `mode: "authenticated"`. Without the `crypto` extra the maker rejects every
+  envelope. A `halt` dispatches only with a `HumanApprovalReceipt` that
+  verifies, is signed by a key bound to the `human` role and to the approver
+  identity the receipt names, whose `permitted_action_digest` equals
+  `envelope.halt_digest` over the halt's sender, maker and `reason_ref`, whose
+  `scope` is `next-action` or `session`, and whose key-bound approver is neither
+  the sender nor the maker. The receipt is single-use: its `(run_id, nonce)` is
+  consumed from the agent's `NonceStore` once every other check passes, so it
+  authorises exactly one halt. `confirm=True` alone does not dispatch.
 
 `FileInbox` creates message files, their temporary files and sequence-claim
 files with mode 0600 in both modes.
@@ -383,10 +390,15 @@ channel and the governance block:
   calling executor's identity equals `aud` and it presents an Ed25519 proof of
   possession, by the key `cnf.jkt` names, over the permit's `subject_digest` and
   nonce; otherwise it produces no effect and its nonce stays unspent.
-- **Conformance scenarios.** `wire.run_conformance` checks, among others, a
-  forged control sender, a replayed `resume`, a halt without approval, a
-  tampered governance block, a foreign executor, a missing proof of possession
-  and a maker self-report offered as an admission receipt. Each scenario result
+- **Conformance scenarios.** `wire.run_conformance` reports 27 scenarios,
+  among them a forged control sender, a replayed `resume`, a halt without
+  approval, a tampered governance block, a foreign executor, a missing proof of
+  possession, a maker self-report offered as an admission receipt, an agent key
+  signing a human approval, an approver identity its key is not bound to, a
+  maker-signed governance block, a control key bound to another identity than
+  the claimed sender, a replayed halt receipt, a replayed envelope on a
+  participant given no nonce store, and a halt receipt with an unrecognized
+  scope. Each scenario result
   carries an OWASP Agentic AI Top 10 (2026) id (`ASI01`–`ASI10`) in
   `ScenarioResult.asi`.
 
@@ -418,10 +430,13 @@ consumes the block; it does not redefine it.**
 - **Pinned block.** A maker's self-declared block can be pinned by a distinct
   policy author: `GovernanceBlock.digest()` is the RFC 8785 digest of the
   boundary, and `sign_governance_block` signs it. Given the resulting
-  `SignedGovernanceBlock`, `wire.admit` refuses admission when the block in
-  force does not hash to the signed digest, when the signer is the maker, or
-  when the signing key is not bound in the `TrustStore` to `GovernanceBlock` and
-  the policy-author role; on success the permit carries
+  `SignedGovernanceBlock`, `wire.admit` returns REFUSED when the block in
+  force does not hash to the signed digest, when the signing key's bound
+  identity is the maker or differs from the author the block names, or when the
+  signing key is not bound in the `TrustStore` to `GovernanceBlock`, the
+  policy-author role and an identity. A tampered, maker-signed, unbound or
+  digest-mismatched block is REFUSED before any approval is read, since no human
+  review can repair a forged authority; on success the permit carries
   `governance_block_digest`. Without a signed block, admission reads the
   self-declared block unpinned.
 

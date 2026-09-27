@@ -53,11 +53,12 @@ Authenticated control channel. A `ComplianceAgent` configured with a
 `nonce`, an `expires_at` (300 seconds ahead by default) and its `key_id`, and
 signs it with Ed25519 through `wire.signing` (`envelope.stamp_and_sign`). A
 `ControlParticipant` configured with a `trust_store` applies an envelope only
-when its key resolves and is bound to `A2AControlMessage` and the sender's role,
-the signature verifies, it has not expired, its `(sender, nonce)` pair is new to
-the injected `NonceStore`, and `authorize()` allows the verb; any other envelope
-is never applied and is answered `ack{accepted: false}` with the reason. Without
-the `crypto` extra an authenticated participant rejects every envelope. The four
+when its key resolves and is bound to `A2AControlMessage`, the sender's role and
+an identity equal to the envelope's `from_.actor`, the signature verifies, it has
+not expired, its `(sender, nonce)` pair is new to the `NonceStore`, and
+`authorize()` allows the verb; any other envelope is never applied and is
+answered `ack{accepted: false}` with the reason. Without the `crypto` extra an
+authenticated participant rejects every envelope. The four
 fields are optional in `schema/a2a-control-message.schema.json` and omitted from
 a bare envelope.
 
@@ -74,9 +75,12 @@ Pinned governance block. `GovernanceBlock.digest()` is the RFC 8785 digest of
 the block's boundary, and `sign_governance_block` returns a
 `SignedGovernanceBlock` a policy author signs. Given one, `wire.admit` refuses
 admission when the block in force does not hash to the signed digest, when the
-signer is the plan's maker, or when the signing key is not bound in the
-`TrustStore` to `GovernanceBlock` and the policy-author role; on success the
-permit carries `governance_block_digest`. The `ExecutionPermit` schema gains
+signing key's bound identity is the plan's maker or differs from the author the
+block names, or when the signing key is not bound in the `TrustStore` to
+`GovernanceBlock`, the policy-author role and an identity: a tampered,
+maker-signed, unbound or digest-mismatched block makes `admit` return REFUSED,
+checked before the approval gate, since no human review can repair a forged
+authority. On success the permit carries `governance_block_digest`. The `ExecutionPermit` schema gains
 the optional `aud`, `cnf` and `governance_block_digest` fields, and the
 `ContextManifest` schema the optional `governance_block_digest`.
 
@@ -84,18 +88,50 @@ Conformance scenarios for the channel, the permit and the pin, each tagged.
 `wire.run_conformance` adds scenarios for a foreign executor, a missing proof of
 possession, a forged control sender, a replayed `resume`, a halt without
 approval, a tampered governance block, and a maker self-report offered as an
-admission receipt. Every `ScenarioResult` carries an OWASP Agentic AI Top 10
-(2026) id (`ASI01`-`ASI10`) in `asi`. None of the new scenarios changes how
-`Profile` grades a deployment.
+admission receipt, and for the exploits the key-bound identity and durable
+nonce store close: `agent_key_signed_approval_rejected`,
+`approver_identity_mismatch_rejected`, `governance_block_signed_by_maker_refused`,
+`control_actor_identity_mismatch_rejected`, `replayed_halt_receipt_rejected`,
+`control_replay_without_injected_nonce_store_rejected` and
+`halt_receipt_scope_violation_rejected`. `run_conformance` now reports 27
+scenarios. Every `ScenarioResult` carries an OWASP Agentic AI Top 10 (2026) id
+(`ASI01`-`ASI10`) in `asi`, which is now a required field. None of the new
+scenarios changes how `Profile` grades a deployment.
+
+Key-bound identity. `TrustBinding` gains `identity`, the principal a key speaks
+for, set in deployment configuration (`InMemoryTrustStore.add(..., identity=)`)
+and never read from the signed object. Every check that decides who signed
+compares against it: `wire.verification.verify_human_approval` accepts a
+`HumanApprovalReceipt` only when its key is bound to the `human` role and to the
+identity `approver.id` names, and returns that key-bound identity; a
+`StageReceipt`'s `issuer` must equal its key's bound identity; a
+`SignedGovernanceBlock`'s author must equal its key's bound identity and differ
+from the maker; a control envelope's `from_.actor` must equal its key's bound
+identity. A key bound to no identity fails each of these checks. It is still
+accepted where `wire.verification.verify` asks only whether a key authorized
+for the object type (and, for a `StageReceipt`, the role) signed an object, as
+for an `ExecutionPermit`, `ToolReceipt` or `Reconciliation`; no claim about
+which principal signed rests on that check.
+
+Durable nonce store. `a2a_compliance.nonce_store.FileNonceStore` is a
+stdlib-only, file-backed `NonceStore`: one `O_CREAT | O_EXCL` marker per
+`(run_id, nonce)`, files 0600 under a 0700 directory. A `ControlParticipant` or
+`ComplianceAgent` constructed with a `trust_store` and no `nonce_store` defaults
+to one under its inbox root, so authenticated mode never skips the replay check,
+and rejects an envelope or halt approval if the store has been removed.
 
 ### Changed
 
 `ComplianceAgent.halt()` in authenticated mode (a `trust_store` configured)
 no longer dispatches on `confirm=True`. It dispatches only with a
-`HumanApprovalReceipt` that verifies through `wire.verification.verify`, whose
-`permitted_action_digest` equals `envelope.halt_digest` for that halt, and whose
-approver has role `human` and is neither the sender nor the maker; otherwise the
-halt is surfaced to the human and not sent. In bare mode (no `trust_store`)
+`HumanApprovalReceipt` that verifies through
+`wire.verification.verify_human_approval` (a key bound to the `human` role and
+to the approver identity the receipt names), whose `permitted_action_digest`
+equals `envelope.halt_digest` for that halt, whose `scope` is `next-action` or
+`session`, and whose key-bound approver is neither the sender nor the maker.
+The receipt is single-use: its `(run_id, nonce)` is consumed from the agent's
+`NonceStore` only after every other check passes, so a valid receipt authorises
+exactly one halt. Otherwise the halt is surfaced to the human and not sent. In bare mode (no `trust_store`)
 `confirm=True` still dispatches, and the maker answers every honoured message
 with `mode: "advisory"`; in authenticated mode, with `mode: "authenticated"`.
 
@@ -116,7 +152,9 @@ names the `crypto` extra and `referencing`. `tests/test_readme_claims.py`
 re-derives every counted claim in the README -- test count, Python floor,
 released version, extras, role/plane/repository counts -- from the collected
 suite, `pyproject.toml`, the CHANGELOG and the package, so a claim that stops
-being true fails the suite.
+being true fails the suite. `tests/test_wire_e5.py` expects the full, current
+scenario set, and `tests/test_conformance_scenario_registry.py` pins the
+canonical scenario names against a live `run_conformance()` report.
 
 The intended-versus-observed effect comparison is the `effect-reconciliation`
 plane's computation and reaches the receipt-gated lifecycle only as that plane's

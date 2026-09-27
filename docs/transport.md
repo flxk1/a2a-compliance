@@ -38,16 +38,20 @@ The mode is set by configuration, not negotiated on the wire.
   subject (`wire/signing.py`), so the nonce and expiry are covered by the
   signature. A `ControlParticipant` with a `trust_store` applies an envelope only
   if all of the following hold: `key_id` resolves in the trust store; the key is
-  bound to `A2AControlMessage` and to the sender's claimed role; the signature
-  verifies; `expires_at` is in the future; the `(sender, nonce)` pair has not been
-  seen by the injected `NonceStore` (checked only when one is injected, and
-  recorded only after every other check passes); and `authorize()` allows the
+  bound to `A2AControlMessage`, to the sender's claimed role and to an identity
+  equal to the envelope's `from_.actor`; the signature verifies; `expires_at` is
+  in the future; the `(sender, nonce)` pair has not been seen by the `NonceStore`
+  (a durable, file-backed `FileNonceStore` under the inbox root unless one is
+  injected, never skipped, and recorded only after every other check passes); and `authorize()` allows the
   sender's role that verb. An envelope that fails any check is never applied; the
   maker answers `ack{accepted: false}` with the reason. An applied envelope is
   answered with `mode: "authenticated"`. A `ComplianceAgent` with a `trust_store`
-  dispatches `halt` only with a `HumanApprovalReceipt` that verifies, is bound to
-  `envelope.halt_digest` for that halt, and is approved by a `human` identity other
-  than the sender and the maker; `confirm=True` alone does not dispatch.
+  dispatches `halt` only with a `HumanApprovalReceipt` that verifies, is signed by
+  a key bound to the `human` role and to the approver identity it names, is bound
+  to `envelope.halt_digest` for that halt, carries the scope `next-action` or
+  `session`, and is approved by an identity other than the sender and the maker;
+  each receipt is consumed once, so it authorises a single halt. `confirm=True`
+  alone does not dispatch.
 - **Without the `crypto` extra.** Signature checks need `cryptography`. An
   authenticated participant that cannot import it rejects every envelope (fail
   closed); bare mode does not need it.

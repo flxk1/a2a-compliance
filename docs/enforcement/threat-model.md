@@ -56,13 +56,30 @@ halt approver must be a `human` identity other than the sender and the maker
 identity must differ from the permit issuer, the reconciler, the tool executors
 and the approver (`wire/certification.py`).
 
+Identities are bound to keys. `TrustBinding.identity` (`wire/trust.py`) is the
+principal a key speaks for, set in deployment configuration and never read
+from the signed object. Every check that decides which principal signed
+compares the object's claimed name against the signing key's bound identity
+and roles, and fails closed when the key is bound to no identity: the approver
+of a `HumanApprovalReceipt` (`wire.verification.verify_human_approval`: key
+bound to the `human` role and to `approver.id`), the issuer of a `StageReceipt`
+(`wire.verification`, `_trust_findings`), the author of a
+`SignedGovernanceBlock` (`_governance_block_findings`) and the sender of a
+signed control envelope (`participant.py`, `from_.actor`). A key bound to no
+identity (`identity=None`, the default of `InMemoryTrustStore.add`) is still
+accepted where `wire.verification.verify` asks only whether a key authorized
+for the object type (and, for a `StageReceipt`, the role) signed the object,
+as for an `ExecutionPermit`, `ToolReceipt`, `Reconciliation` or
+`ContextManifest`. That check establishes only that some authorized key signed;
+no claim about which principal signed rests on it.
+
 ## Attack paths (first threat model; plan-named)
 
 | Attack | E0 mitigation | What E0 does *not* cover |
 |---|---|---|
-| **Forged receipt** | Schema validation rejects malformed shape; `subject_digest` recompute rejects any receipt whose claimed digest doesn't match its own canonical content. | Whether the `signature` over that digest is valid, or came from a trusted `key_id`. Covered in E1: when a `TrustStore` is passed, `wire.verification.verify` resolves `key_id`, checks the key is bound to the object type (and, for a `StageReceipt`, the role), and verifies the Ed25519 signature over the DSSE PAE of the canonical subject (`wire/signing.py`, `wire/trust.py`). |
+| **Forged receipt** | Schema validation rejects malformed shape; `subject_digest` recompute rejects any receipt whose claimed digest doesn't match its own canonical content. | Whether the `signature` over that digest is valid, or came from a trusted `key_id`. Covered in E1: when a `TrustStore` is passed, `wire.verification.verify` resolves `key_id`, checks the key is bound to the object type (and, for a `StageReceipt`, the role and the `issuer` identity), and verifies the Ed25519 signature over the DSSE PAE of the canonical subject (`wire/signing.py`, `wire/trust.py`). |
 | **Altered context** | Any change to a signed object's fields changes its canonical bytes and therefore its digest; a `ContextManifest` bound into a later object by digest cannot be silently swapped without that binding breaking. | E0 does not itself verify that a *consumer* actually checks the binding — that is E2 admission logic. |
-| **Replay** | `NonceStore` port scoped by `(run_id, nonce)`; a second `verify()` of any object sharing a previously-consumed pair is rejected. | E0's `InMemoryNonceStore` is test-only and non-durable; a host needs a durable store. Atomic pre-dispatch consumption is built in E3: `wire.executor.consume_and_execute` spends the permit nonce through `NonceStore.consume`, a single compare-and-set. |
+| **Replay** | `NonceStore` port scoped by `(run_id, nonce)`; a second `verify()` of any object sharing a previously-consumed pair is rejected. | E0's `InMemoryNonceStore` is test-only and non-durable. The control channel defaults to the durable, file-backed `FileNonceStore` (`nonce_store.py`) in authenticated mode; a host may inject its own. Atomic pre-dispatch consumption is built in E3: `wire.executor.consume_and_execute` spends the permit nonce through `NonceStore.consume`, a single compare-and-set. |
 | **Confused deputy** | `ToolReceipt.tool` is the *actual* tool invoked (not the nominally requested one), and `ToolReceipt.executor` is a distinct principal from the requester — both are visible on the wire for a later comparison. | E0 does not perform that comparison; that is reconciliation logic (E4) over these receipts. |
 | **Stale policy** | `expires_at` staleness check rejects any object presented past its own expiry. | E0 has no concept of a *policy's* freshness independent of the object's own `expires_at` — that is `norm-freshness` (E4-adjacent repo). |
 | **Partial execution** | `ToolReceipt` carries `started_at`/`ended_at` per call, and `dispatch_id` binds multiple `ToolReceipt`s to one `ControlReceipt`; a caller can see the receipt set is incomplete. | E0 does not decide completeness or certify — E4. |
@@ -118,10 +135,14 @@ Each is opt-in: a caller that configures none of it gets the earlier behaviour.
    seconds ahead) and `key_id`, and signs it through `wire/signing.py`
    (`envelope.stamp_and_sign`). A `ControlParticipant` with a `trust_store`
    honours an envelope only if its `key_id` resolves, the key is bound to
-   `A2AControlMessage` and to the sender's claimed role, the Ed25519 signature
-   verifies, `expires_at` is in the future, the `(sender, nonce)` pair has not
-   been seen by the injected `NonceStore`, and `authorize()` allows the
-   sender's role the verb. A rejected envelope is never applied; the maker
+   `A2AControlMessage`, to the sender's claimed role and to an identity equal
+   to the envelope's `from_.actor`, the Ed25519 signature verifies,
+   `expires_at` is in the future, the `(sender, nonce)` pair has not been seen
+   by the `NonceStore`, and `authorize()` allows the sender's role the verb.
+   The replay check is never skipped in authenticated mode: a participant or
+   agent constructed with a `trust_store` and no `nonce_store` defaults to a
+   durable `FileNonceStore` under its inbox root (`nonce_store.py`), and one
+   left with no store rejects the envelope. A rejected envelope is never applied; the maker
    answers `ack{accepted: false}` with the reason. Without the `crypto` extra
    an authenticated participant rejects every envelope. Without a
    `trust_store` (bare mode) envelopes are unsigned, and every honoured message
@@ -129,12 +150,17 @@ Each is opt-in: a caller that configures none of it gets the earlier behaviour.
 2. **Approval-gated halt** (`channel.py`, `ComplianceAgent.halt`). With a
    `trust_store` configured, `confirm=True` no longer dispatches a halt. The
    halt dispatches only with a `HumanApprovalReceipt` that verifies through
-   `wire.verification.verify` against the agent's `trust_store` (signature,
-   trust binding, expiry; revocation and replay when the agent also has a
-   `revocation_store` and a `nonce_store`), whose `permitted_action_digest` equals `envelope.halt_digest`
-   over this halt's sender, maker and `reason_ref`, and whose approver has
-   role `human` and an id other than the sender and the maker. Otherwise the
-   halt is surfaced to the human and not sent. In bare mode `confirm=True`
+   `wire.verification.verify_human_approval` against the agent's `trust_store`
+   (signature, trust binding, expiry, revocation when the agent also has a
+   `revocation_store`, and a key bound to the `human` role and to the approver
+   identity the receipt names), whose `permitted_action_digest` equals
+   `envelope.halt_digest` over this halt's sender, maker and `reason_ref`,
+   whose `scope` is `next-action` or `session`, and whose key-bound approver
+   is neither the sender nor the maker. The receipt is single-use: its
+   `(run_id, nonce)` is consumed from the agent's `NonceStore` only after
+   every other check passes, so a valid receipt authorises exactly one halt
+   and a rejected one burns no nonce. Otherwise the halt is surfaced to the
+   human and not sent. In bare mode `confirm=True`
    remains an advisory gate with no cryptographic binding.
 3. **Sender-constrained permit** (`wire/admission.py`, `wire/executor.py`,
    `wire/signing.py`). `issue_permit` takes `aud` and `cnf` together (RFC 7800
@@ -149,10 +175,13 @@ Each is opt-in: a caller that configures none of it gets the earlier behaviour.
    `GovernanceBlock.digest()` is the RFC 8785 digest of the block's boundary;
    `sign_governance_block` has a policy author sign it. Given a
    `SignedGovernanceBlock`, `admit()` refuses admission when the block in
-   force does not hash to the signed digest, when the signer is the plan's
-   maker, or when the signing key is not bound in the `TrustStore` to
-   `GovernanceBlock` and the policy-author role (`policy-author` by default),
-   or its signature fails. On success the digest is carried into the permit
+   force does not hash to the signed digest, when the signing key's bound
+   identity is the plan's maker or differs from the author the block names,
+   when the signing key is not bound in the `TrustStore` to `GovernanceBlock`,
+   the policy-author role (`policy-author` by default) and an identity, or
+   when its signature fails. Each of these makes `admit` return REFUSED,
+   checked before the approval gate: no human review can repair a forged
+   authority. On success the digest is carried into the permit
    as `governance_block_digest`. `consume_and_execute` does not re-check it.
 
 Control-channel files: `FileInbox` creates message files, their temporary
@@ -163,8 +192,14 @@ The conformance kit (`wire/conformance_kit.py`) exercises these guarantees:
 `control_forged_sender_rejected`, `control_replayed_resume_rejected` and
 `control_unapproved_halt_not_dispatched` for the channel,
 `tampered_governance_block_not_admitted` for the pin, and
-`self_report_never_satisfies_admission` for a maker's self-report. Every
-scenario carries an OWASP Agentic AI Top 10 (2026) id (`ASI01`-`ASI10`) in
+`self_report_never_satisfies_admission` for a maker's self-report. Seven
+more exercise key-bound identity and the durable nonce store:
+`agent_key_signed_approval_rejected`, `approver_identity_mismatch_rejected`,
+`governance_block_signed_by_maker_refused`,
+`control_actor_identity_mismatch_rejected`, `replayed_halt_receipt_rejected`,
+`control_replay_without_injected_nonce_store_rejected` and
+`halt_receipt_scope_violation_rejected`. `run_conformance` reports 27
+scenarios in all. Every scenario carries an OWASP Agentic AI Top 10 (2026) id (`ASI01`-`ASI10`) in
 `ScenarioResult.asi`. None of these scenarios changes how `Profile` grades a
 deployment.
 
@@ -172,8 +207,9 @@ deployment.
 
 - Trust-root and role-binding configuration format (plan: "deployment
   configuration, never embedded as trusted payload data"). The package ships
-  only the `TrustStore`/`RevocationStore`/`NonceStore` ports and test-only
-  in-memory implementations; a host supplies durable ones.
+  only the `TrustStore`/`RevocationStore`/`NonceStore` ports, test-only
+  in-memory implementations and the file-backed `FileNonceStore`; a host
+  supplies a durable trust store and revocation store.
 - Full DSSE envelopes and in-toto attestations. Signatures use the DSSE PAE
   construction over the canonical subject, but no object is wrapped in a DSSE
   envelope or emitted as an in-toto statement, and the `DSSE_PAYLOAD_TYPE`
@@ -188,9 +224,14 @@ deployment.
   approver port are package-local.
 - A binding to the A2A protocol's own transport and agent cards; the control
   channel runs over `FileInbox` or the opt-in harness transport.
+- Certifier separation: `certify` compares the certifier's identity with the
+  issuer, executor and approver names the permit, receipts, reconciliation
+  and approval carry, and its key id with the permit's, reconciliation's and
+  receipts' key ids; it does not resolve those names to the identities bound
+  to their keys.
 - Control-channel limits: the envelope check does not consult a
-  `RevocationStore`; replay is checked only when a `NonceStore` is injected,
-  through its non-atomic `seen`/`record` pair; a `ComplianceAgent` with a
+  `RevocationStore`; replay is checked through the `NonceStore`'s non-atomic
+  `seen`/`record` pair; a `ComplianceAgent` with a
   `trust_store` but no `signer` sends unsigned envelopes, which an
   authenticated participant rejects; the mailbox directories and the
   `.cursor` file follow the process umask.
