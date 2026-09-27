@@ -56,6 +56,12 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
 # validation) -- FIX 2(b): "unknown scope rejects".
 HALT_APPROVAL_SCOPES = frozenset({"next-action", "session"})
 
+# Sentinel `nonce` value (never a real receipt nonce -- receipts are
+# schema-shaped strings from a signer, never this literal) used to mark,
+# per run_id, that a 'next-action'-scoped halt approval has already been
+# spent in this run. See `_verify_halt_approval`'s scope-RULE check.
+_NEXT_ACTION_SCOPE_MARKER = "__halt:next-action-scope-used__"
+
 
 @dataclass
 class DispatchResult:
@@ -303,12 +309,19 @@ class ComplianceAgent:
         key, authorized for `HumanApprovalReceipt` but bound to no human
         role/identity, self-declaring a human approver).
 
-        Three checks layer on top, none of them reimplementing
+        Four checks layer on top, none of them reimplementing
         `verify_human_approval`'s own signature/schema/trust/identity work:
         (1) digest binding -- unchanged; (2) the bound approver identity
         must also differ from `maker` (verify_human_approval only checks it
-        differs from the SENDER); (3) single-use + scope -- FIX 2(b): the
-        receipt's `(run_id, nonce)` is CONSUMED (atomic compare-and-set) only
+        differs from the SENDER); (3) the scope RULE itself -- `scope` must
+        be a recognized value (defense in depth alongside the schema's own
+        enum, which currently mirrors `HALT_APPROVAL_SCOPES` exactly) AND,
+        when it is `'next-action'`, it authorises only the SINGLE next halt
+        for this `run_id` -- a second, otherwise-fully-valid receipt with
+        its own fresh `(run_id, nonce)` and its own digest cannot approve a
+        second halt in the same run under `'next-action'` scope (only
+        `'session'` scope may); (4) single-use -- FIX 2(b): the receipt's
+        own `(run_id, nonce)` is CONSUMED (atomic compare-and-set) only
         after every other check has passed, so a forged/tampered/out-of-scope
         receipt can never burn a legitimate nonce, and a legitimate receipt
         can never approve a second halt."""
@@ -346,8 +359,31 @@ class ComplianceAgent:
             # rather than silently skip single-use enforcement if a caller
             # ever mutates it back to None (fail closed, FIX 2c posture).
             return "halt approval cannot be enforced single-use without a nonce store"
+
         if not self.nonce_store.consume(run_id, nonce):
+            # The SAME receipt presented twice: this per-receipt single-use
+            # check runs first, so an identical replay is reported this way
+            # (unchanged), never as the distinct scope-rule denial below.
             return "halt approval receipt has already been used (single-use)"
+
+        if scope == "next-action" and self.nonce_store.seen(run_id, _NEXT_ACTION_SCOPE_MARKER):
+            # The scope RULE itself (not merely the enum-membership check
+            # above): 'next-action' authorises exactly ONE halt for this
+            # run_id, ever -- distinct from the per-receipt single-use
+            # nonce just consumed, which only stops the SAME receipt being
+            # replayed. A second, independently signed, otherwise fully
+            # valid 'next-action' receipt (its own fresh (run_id, nonce)
+            # and its own digest, for a DIFFERENT halt) must still be
+            # refused here; only 'session' scope may authorise more than
+            # one halt per run.
+            return "halt approval scope 'next-action' already used for a prior halt in this run"
+
+        if scope == "next-action":
+            # Recorded only now that every other check (including this
+            # receipt's own single-use nonce, just consumed above) has
+            # passed, so a rejected/forged receipt never burns this run's
+            # next-action allowance.
+            self.nonce_store.record(run_id, _NEXT_ACTION_SCOPE_MARKER)
 
         return None
 

@@ -178,6 +178,29 @@ and `docs/compliance-team.md` had stated three different repository counts;
 each now states 43, and `tests/test_readme_claims.py` derives the count from
 `COMPLIANCE_ROLES` and holds all three documents to it.
 
+The plain `wire.verification.verify` call for a `HumanApprovalReceipt` did not
+itself check the signing key's bound role/identity against the receipt's
+self-declared `approver` -- only the opt-in `verify_human_approval` wrapper
+did. `verify()` now runs that check itself whenever a `trust_store` is
+supplied: a key not bound to the `human` role, or bound to an identity other
+than `approver.id`, fails plain `verify()` too, not only its wrapper.
+`docs/enforcement/threat-model.md` attributed this check solely to
+`verify_human_approval`; it now names `verify()` itself as where it lives.
+
+`ComplianceAgent.halt`'s `scope` check (`channel.HALT_APPROVAL_SCOPES`)
+mirrored the `HumanApprovalReceipt` schema's own `scope` enum exactly, so an
+out-of-enum value was always caught by schema validation first and the
+channel's own check never ran; `'next-action'` and `'session'` were
+otherwise indistinguishable; every receipt was single-use per its own
+`(run_id, nonce)` regardless of which it declared. `'next-action'` now
+authorises exactly one halt per `run_id` (checked and recorded independently
+of the receipt's own nonce), so a second, independently signed, otherwise
+fully valid `'next-action'` receipt for a different halt in the same run is
+refused; only `'session'` scope may authorise more than one halt per run.
+The `halt_receipt_scope_violation_rejected` conformance scenario now exercises
+this rule with a schema-valid `'next-action'` scope instead of an out-of-enum
+value.
+
 ## 0.4.0
 
 Signed receipt chain. Receipts are signed with Ed25519 over the same canonical

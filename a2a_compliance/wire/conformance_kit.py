@@ -362,7 +362,15 @@ def dev_conformance_ports(*, executor: Optional[ExecutorPort] = None) -> Conform
         "key-conformance-stage", keys["stage"][1], frozenset({"StageReceipt"}), frozenset({ANY}),
         identity="conformance:stage",
     )
-    trust_store.add("key-conformance-approval", keys["approval"][1], frozenset({"HumanApprovalReceipt"}), frozenset())
+    # Bound to the human role AND an identity (never left unbound/anonymous):
+    # a dev/test port must genuinely be able to pass the wire-level
+    # human-role/identity check (`verification._human_approval_wire_findings`,
+    # baked into plain `verify()`), never bypass it by being an
+    # intrinsically-unusable stub key.
+    trust_store.add(
+        "key-conformance-approval", keys["approval"][1], frozenset({"HumanApprovalReceipt"}), frozenset({HUMAN_ROLE}),
+        identity="conformance:approver",
+    )
     trust_store.add("key-conformance-permit", keys["permit"][1], frozenset({"ExecutionPermit"}), frozenset())
     trust_store.add("key-conformance-recorder", keys["recorder"][1], frozenset({"ToolReceipt"}), frozenset())
     trust_store.add("key-conformance-reconciler", keys["reconciler"][1], frozenset({"Reconciliation"}), frozenset())
@@ -1429,15 +1437,18 @@ def _scenario_control_replay_without_injected_nonce_store_rejected(ports, record
 
 
 def _scenario_halt_receipt_scope_violation_rejected(ports, recorder, reference, far_future, run_id):
-    """A genuinely valid, human-signed halt approval receipt whose `scope`
-    is NOT one of the recognized values must be rejected. The schema's own
-    `scope` enum currently mirrors `channel.HALT_APPROVAL_SCOPES` exactly,
-    so an out-of-enum value is caught at schema validation (inside
-    `verify_human_approval`'s own `verify()` call) before `channel.py`'s
-    explicit defense-in-depth scope check ever runs -- this scenario
-    asserts the receipt is rejected and the denial names the scope, not
-    which specific layer caught it (both are the real fcb6a22 guarantee:
-    an unrecognized scope can never authorise a halt)."""
+    """A genuinely valid, human-signed, schema-valid `'next-action'`-scoped
+    halt approval dispatches the FIRST halt of a run; a SECOND, independently
+    signed, otherwise fully valid `'next-action'`-scoped receipt (its own
+    fresh `(run_id, nonce)`, its own digest, for a different halt) must be
+    REJECTED for the same run -- the scope RULE itself (`'next-action'`
+    authorises exactly one halt per run; only `'session'` scope may
+    authorise more than one), not schema validation: both receipts are
+    individually schema-valid (the `scope` enum only restricts VALUES,
+    `{'next-action', 'session'}`, never how many halts one value may cover),
+    so this exercises `channel.py`'s own scope-rule check -- disabling that
+    check makes this scenario (and the exact receipt pair) accept the
+    second halt."""
     comp_actor, maker_id = f"{run_id}:comp", f"{run_id}:maker"
     approver_priv, approver_pub = generate_dev_keypair()
     trust_store = InMemoryTrustStore()
@@ -1450,30 +1461,41 @@ def _scenario_halt_receipt_scope_violation_rejected(ports, recorder, reference, 
         session_id=comp_actor, role="policy-compliance", inbox=_InMemoryInbox(),
         roster=Roster(), trust_store=trust_store,
     )
-    reason_ref = f"{run_id}:reason"
-    digest = env.halt_digest(comp_actor, maker_id, reason_ref)
-    approval = {
-        "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
-        "issuer": f"issuer:{approver_identity}",
-        "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
-        "run_id": run_id, "nonce": f"{run_id}:scope-approval",
-        "key_id": "key-scope-approver",
-        "approver": {"id": approver_identity, "role": HUMAN_ROLE},
-        "permitted_action_digest": digest,
-        "scope": "whenever-i-feel-like-it",  # not in HALT_APPROVAL_SCOPES
-        "reservations": [],
-    }
-    approval["subject_digest"] = canonical.subject_digest(approval)
-    approval["signature"] = dev_sign_subject(approval, approver_priv)
 
-    result = comp.halt(maker_id, reason_ref=reason_ref, approval=approval, now=reference)
+    def _approval_for(reason_ref: str, nonce: str) -> dict:
+        digest = env.halt_digest(comp_actor, maker_id, reason_ref)
+        approval = {
+            "schema_version": "1.0.0", "type": "HumanApprovalReceipt",
+            "issuer": f"issuer:{approver_identity}",
+            "issued_at": reference.isoformat(), "expires_at": far_future.isoformat(),
+            "run_id": run_id, "nonce": nonce,
+            "key_id": "key-scope-approver",
+            "approver": {"id": approver_identity, "role": HUMAN_ROLE},
+            "permitted_action_digest": digest,
+            "scope": "next-action",  # schema-valid on BOTH receipts
+            "reservations": [],
+        }
+        approval["subject_digest"] = canonical.subject_digest(approval)
+        approval["signature"] = dev_sign_subject(approval, approver_priv)
+        return approval
+
+    first_reason, second_reason = f"{run_id}:reason-1", f"{run_id}:reason-2"
+    first_approval = _approval_for(first_reason, f"{run_id}:scope-approval-1")
+    second_approval = _approval_for(second_reason, f"{run_id}:scope-approval-2")
+
+    first = comp.halt(maker_id, reason_ref=first_reason, approval=first_approval, now=reference)
+    second = comp.halt(maker_id, reason_ref=second_reason, approval=second_approval, now=reference)
     ok = (
-        result.dispatched is False
-        and result.denied_reason is not None
-        and "scope" in result.denied_reason
-        and "whenever-i-feel-like-it" in result.denied_reason
+        first.dispatched is True
+        and second.dispatched is False
+        and second.denied_reason is not None
+        and "scope" in second.denied_reason
+        and "next-action" in second.denied_reason
     )
-    return ok, f"dispatched={result.dispatched}, denied_reason={result.denied_reason!r}"
+    return ok, (
+        f"first dispatched={first.dispatched}, "
+        f"second dispatched={second.dispatched}, second denied_reason={second.denied_reason!r}"
+    )
 
 
 # Scenarios whose PASS jointly evidences "bypass is tested and rejected"

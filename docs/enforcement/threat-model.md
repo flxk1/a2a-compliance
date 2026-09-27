@@ -61,7 +61,8 @@ principal a key speaks for, set in deployment configuration and never read
 from the signed object. Every check that decides which principal signed
 compares the object's claimed name against the signing key's bound identity
 and roles, and fails closed when the key is bound to no identity: the approver
-of a `HumanApprovalReceipt` (`wire.verification.verify_human_approval`: key
+of a `HumanApprovalReceipt` (`wire.verification.verify` itself, whenever a
+`trust_store` is passed -- not only its `verify_human_approval` wrapper: key
 bound to the `human` role and to `approver.id`), the issuer of a `StageReceipt`
 (`wire.verification`, `_trust_findings`), the author of a
 `SignedGovernanceBlock` (`_governance_block_findings`) and the sender of a

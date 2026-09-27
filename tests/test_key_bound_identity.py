@@ -77,11 +77,12 @@ def _approval(*, key_id, approver_id, approver_role, nonce="nonce-approval-0001"
 
 def test_exploit_sender_agent_key_claiming_human_approver_is_rejected():
     """Exact shape of `exploit.py`: the SENDER's own agent key is bound for
-    the `HumanApprovalReceipt` object type (so plain `verify()` accepts the
-    signature) but for the agent's OWN role, never 'human', and no identity
-    -- yet the receipt self-declares `approver.role: 'human'`,
-    `approver.id: 'not-me-honest'`. `verify_human_approval` must reject
-    this; before this fix nothing did."""
+    the `HumanApprovalReceipt` object type (so signature/type/schema are all
+    genuinely valid) but for the agent's OWN role, never 'human', and no
+    identity -- yet the receipt self-declares `approver.role: 'human'`,
+    `approver.id: 'not-me-honest'`. Both the PLAIN `verify()` (baked in, not
+    opt-in -- see `verification._human_approval_wire_findings`) and the
+    richer `verify_human_approval` helper must reject this."""
     priv, pub = generate_dev_keypair()
     trust_store = InMemoryTrustStore()
     trust_store.add(
@@ -94,7 +95,8 @@ def test_exploit_sender_agent_key_claiming_human_approver_is_rejected():
     signed = _stamp_and_sign(approval, priv)
 
     plain = verify(signed, "HumanApprovalReceipt", trust_store=trust_store, now=NOW)
-    assert plain.ok, plain.errors  # signature/type/schema ARE all genuinely valid
+    assert plain.ok is False
+    assert any("human role" in e for e in plain.errors)
 
     result = verify_human_approval(signed, trust_store=trust_store, now=NOW)
     assert result.ok is False
