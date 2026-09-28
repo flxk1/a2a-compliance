@@ -77,11 +77,6 @@ def test_skill_md_governance_block_validates_against_schema():
     validator.validate(block)  # raises on the first violation
 
 
-@pytest.mark.skipif(
-    _schema_path() is None,
-    reason="no SKILL_GOVERNANCE_BLOCK_SCHEMA/SKILL_GOVERNANCE_BLOCK_REPO env var "
-    "pointing at a flxk1/skill-governance-block clone's schema",
-)
 def test_skill_md_governance_block_declares_the_three_coordinate_tools():
     block = _governance_block(SKILL_MD)
     capabilities = block.get("capabilities") or []

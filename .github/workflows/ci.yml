@@ -54,6 +54,12 @@ jobs:
           repository: flxk1/loomground-falsifiability
           ref: e146366501bce91ec10757823dc2c9962b4d7b88
           path: loomground-repos/loomground-falsifiability
+      - name: checkout skill-governance-block (schema for the SKILL.md block test)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          repository: flxk1/skill-governance-block
+          ref: af43f1c5275ab4f72ff766995d67218ad6eeb1af
+          path: skill-governance-block
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -72,6 +78,8 @@ jobs:
       # tests self-skip per their own skipif, honestly.
       - name: test
         working-directory: a2a-compliance
+        env:
+          SKILL_GOVERNANCE_BLOCK_REPO: ${{ github.workspace }}/skill-governance-block
         run: python3 -m pytest -q
 
   commit-discipline:
