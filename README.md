@@ -64,7 +64,7 @@ Runtime controls. `ComplianceTeam` assigns the 42 repositories to eight roles. O
 
 ## Status
 
-417 tests · Python >=3.10 · latest tagged release 0.4.0
+419 tests · Python >=3.10 · latest tagged release 0.4.0
 
 `main` carries the whole enforcement chain: admission over verified stage receipts, single-use signed execution permits, mediated execution in which a replayed, tampered, expired or revoked permit produces no effect, postflight reconciliation of observed effects against the permit, and an oversight certificate issued only when every check passes and the certifier is a distinct identity from the issuer, the executors, the reconciler and the approver. `main` also carries an authenticated control channel (signed, expiring envelopes with a replay-checked nonce held in a durable store by default, and a halt gated on a verified, single-use human-approval receipt), sender-constrained permits, and a governance block pinned by a distinct policy author's signature. Identities are bound to keys: the approver of a human-approval receipt, the author of a pinned governance block, the issuer of a stage receipt and the sender of a control envelope must each equal the identity the trust store binds to the signing key, and a key bound to no identity fails each of those checks. A key bound to no identity is still accepted where a check asks only whether a key authorized for that object type and role signed the object, never where it asks which principal did. Each is opt-in: a deployment that configures no trust store runs the control channel in bare mode, where every honoured message is advisory. The 0.4.0 tag predates that chain, which is recorded under `Unreleased` in the [CHANGELOG](CHANGELOG.md).
 

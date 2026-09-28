@@ -14,6 +14,15 @@ description: >-
 allowed-tools: a2a_plan a2a_admission_preview a2a_reconcile a2a_ground
 governance:
   grade: L1
+  capabilities:
+    # evidence-grounder's coordinate tools (a2a_compliance/roles/evidence-grounder.json,
+    # team.py's COMPLIANCE_ROLES, coord_grounding.py): resolve a maker's proposed 5D+nD
+    # coordinate, the entries anchored at one nD cell, and a coordinate reference into
+    # its canonical form + digest. Same `tool:<name>` naming this package's own
+    # Capability.key uses; additive (schema `additionalProperties: true`).
+    - tool:versum_coords
+    - tool:versum_cell
+    - tool:nd_resolve
   actions:
     - { kind: query_state, risk: low }
     - { kind: issue_directive, risk: medium }
