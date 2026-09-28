@@ -139,6 +139,14 @@ COMPLIANCE_ROLES: tuple[ComplianceRole, ...] = (
     ComplianceRole("evidence-grounder", "Acquire, normalise and span-ground evidence.", (
         _tool("loomground-ingest", "ingest_text"),
         _tool("loomground-versum", "versum_index"),
+        # Coordinate tools (loomground-mcp namespace, same versum_* prefix as
+        # versum_index above): resolve a maker's proposed 5D+nD coordinate
+        # (versum_coords), the entries anchored at one nD cell (versum_cell),
+        # and a coordinate reference into its canonical form + digest
+        # (nd_resolve, the 5d-nd resolver seam) -- see coord_grounding.py.
+        _tool("loomground-versum", "versum_coords"),
+        _tool("loomground-versum", "versum_cell"),
+        _tool("loomground-versum", "nd_resolve"),
         _skill("loomground-ingest", "loomground-ingest"),
         _skill("loomground-versum", "loomground-kg"),
     )),

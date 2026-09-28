@@ -81,6 +81,19 @@ from .lifecycle import (
     enforce_preview,
     reconcile,
 )
+from . import coord_grounding
+from .coord_grounding import (
+    CANDIDATE,
+    CONFIRMED,
+    GROUNDING_TIERS,
+    Coordinate,
+    GroundingReference,
+    CoordinateGroundingReceipt,
+    nd_available,
+    default_resolver,
+    resolve_grounding_reference,
+    build_receipt,
+)
 
 __all__ = [
     "Verb",
@@ -143,4 +156,15 @@ __all__ = [
     "Reconciliation",
     "enforce_preview",
     "reconcile",
+    "coord_grounding",
+    "CANDIDATE",
+    "CONFIRMED",
+    "GROUNDING_TIERS",
+    "Coordinate",
+    "GroundingReference",
+    "CoordinateGroundingReceipt",
+    "nd_available",
+    "default_resolver",
+    "resolve_grounding_reference",
+    "build_receipt",
 ]
