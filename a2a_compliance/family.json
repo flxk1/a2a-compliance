@@ -1,7 +1,7 @@
 {
   "_comment": "Human-readable mirror of a2a_compliance/family.py:FAMILY_REPOSITORIES. Not imported at runtime (family.py is the canonical, tested source); kept here for external tooling/review. Keep both in sync by hand or regenerate both from the command below.",
   "source": "gh repo list flxk1 --visibility public --limit 300 --json name,isArchived",
-  "generated": "2026-09-27",
+  "generated": "2026-09-29",
   "rule": "public, non-archived, minus .github",
   "_excluded_public_repos": {
     ".github": "account meta-repo (community health files); not a Loomground-family artifact"
@@ -9,7 +9,7 @@
   "_archived_public_repos": {
     "loomground-composition": "archived 2026-09-16; archived repos are excluded from the family regardless of prior membership"
   },
-  "snapshot_date": "2026-09-27",
+  "snapshot_date": "2026-09-29",
   "family": [
     "5d-nd",
     "a2a-compliance",
@@ -37,7 +37,6 @@
     "loomground-mandate",
     "loomground-mcp",
     "loomground-norm",
-    "loomground-patchbay",
     "loomground-plugins",
     "loomground-proxy",
     "loomground-ref",

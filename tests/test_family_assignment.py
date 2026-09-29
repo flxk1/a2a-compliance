@@ -45,7 +45,7 @@ def test_compliance_roles_names_no_repo_outside_the_family_list():
 
 def test_family_list_has_no_duplicates_and_matches_expected_size():
     assert len(FAMILY_REPOSITORIES) == len(set(FAMILY_REPOSITORIES))
-    assert len(FAMILY_REPOSITORIES) == 42
+    assert len(FAMILY_REPOSITORIES) == 41
 
 
 def test_family_list_excludes_dot_github():
