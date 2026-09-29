@@ -16,11 +16,12 @@ Regenerate/verify with:
 
     gh repo list flxk1 --visibility public --limit 300 --json name,isArchived
 
-Snapshot taken 2026-09-27 against that command's output. It listed 44 public
+Snapshot taken 2026-09-29 against that command's output. It listed 43 public
 repositories, of which 1 was archived (`loomground-composition`, archived
 2026-09-16, superseded by this repository's own 8-role compliance team and
-A2A lifecycle) and 1 is the account meta-repo (`.github`), leaving 42 family
-repositories.
+A2A lifecycle) and 1 is the account meta-repo (`.github`), leaving 41 family
+repositories. `loomground-patchbay` left the family when it was made private
+on 2026-09-29.
 
 Excluded public repos, with reason:
 
@@ -67,7 +68,6 @@ FAMILY_REPOSITORIES: tuple[str, ...] = (
     "loomground-mandate",
     "loomground-mcp",
     "loomground-norm",
-    "loomground-patchbay",
     "loomground-plugins",
     "loomground-proxy",
     "loomground-ref",
@@ -96,6 +96,6 @@ ARCHIVED_PUBLIC_REPOSITORIES: dict[str, str] = {
     ),
 }
 
-assert len(FAMILY_REPOSITORIES) == len(set(FAMILY_REPOSITORIES)) == 42
+assert len(FAMILY_REPOSITORIES) == len(set(FAMILY_REPOSITORIES)) == 41
 assert not (set(FAMILY_REPOSITORIES) & set(EXCLUDED_PUBLIC_REPOSITORIES))
 assert not (set(FAMILY_REPOSITORIES) & set(ARCHIVED_PUBLIC_REPOSITORIES))
