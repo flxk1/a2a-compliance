@@ -194,6 +194,7 @@ COMPLIANCE_ROLES: tuple[ComplianceRole, ...] = (
     ComplianceRole("assurance-recorder", "Verify the decision record and reconcile duties and effects.", (
         _tool("governance-certification", "govcert_verify"),
         _tool("5d-nd", "nd_digest"),
+        _contract("5d-nd"),  # owns the 5d-nd reference seam; evidence-grounder only uses it
         _tool("oversight-certificate", "oversight_issue"),
         _tool("oversight-certificate", "oversight_verify"),
         _tool("enforcement-posture", "enforcement_compare"),
